@@ -54,7 +54,7 @@ class MainWindow(ctk.CTk):
 
         tab_search = self.tabview.add("Search Vendor Details")
         tab_master = self.tabview.add("Master Data Records")
-        tab_grid = self.tabview.add("Import & Update Grid")
+        self._tab_grid = self.tabview.add("Import & Update Grid")
         tab_audit = self.tabview.add("Audit Log")
 
         self.search_tab = SearchTab(tab_search, self.store, on_data_changed=self.refresh_all)
@@ -63,14 +63,28 @@ class MainWindow(ctk.CTk):
         self.master_tab = MasterTab(tab_master, self.store, on_data_changed=self.refresh_all)
         self.master_tab.pack(fill="both", expand=True)
 
-        self.grid_tab = GridTab(tab_grid, self.store, on_data_changed=self.refresh_all)
-        self.grid_tab.pack(fill="both", expand=True)
+        # The bulk grid is ~1,000 widgets (100 rows x 9 editable cells).
+        # Building it eagerly here would freeze the window before it even
+        # appears, for a tab most sessions never open. Build it lazily on
+        # first visit instead - see _on_tab_changed.
+        self.grid_tab = None
+        ctk.CTkLabel(
+            self._tab_grid, text="", fg_color="transparent"
+        ).pack()  # keeps the tab non-empty until first visit
 
         self.audit_tab = AuditLogTab(tab_audit, self.audit_log)
         self.audit_tab.pack(fill="both", expand=True)
 
+        self.tabview.configure(command=self._on_tab_changed)
         self.tabview.set("Search Vendor Details")
         self.refresh_all()
+
+    def _on_tab_changed(self):
+        if self.tabview.get() == "Import & Update Grid" and self.grid_tab is None:
+            for widget in self._tab_grid.winfo_children():
+                widget.destroy()
+            self.grid_tab = GridTab(self._tab_grid, self.store, on_data_changed=self.refresh_all)
+            self.grid_tab.pack(fill="both", expand=True)
 
     def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=theme.BG_SURFACE, corner_radius=0, height=64)

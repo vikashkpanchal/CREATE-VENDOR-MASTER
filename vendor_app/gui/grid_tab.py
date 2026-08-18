@@ -17,6 +17,30 @@ from vendor_app.gui.scroll_canvas import ScrollCanvas
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, danger_button, primary_button, secondary_button
 
+def _wrap_header(text, max_chars):
+    """Greedy word-wrap `text` so every line is <= max_chars.
+
+    Used instead of Tk's own wraplength auto-wrap for the grid header: a
+    tk.Label mixing an explicit "\\n" with a width constraint that still
+    forces a *further* auto-wrap of one segment can miscompute its own
+    required height, clipping the last line. Pre-wrapping every line to
+    fit removes the ambiguity entirely - no segment ever needs a second,
+    Tk-computed wrap.
+    """
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) <= max_chars or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
 CELL_WIDTH = {
     "vendor_code": 14,
     "vendor_name": 24,
@@ -76,33 +100,39 @@ class GridTab(ctk.CTkFrame):
         scroll.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         self.scroll = scroll.body
 
+        # Plain tk widgets throughout (not CTkLabel/CTkEntry): at ~1,000
+        # cells, customtkinter's per-widget canvas-drawing overhead adds up
+        # to a real, noticeable construction delay. Key/paste handlers are
+        # bound ONCE via bind_class + a shared bindtag, not once per cell
+        # (900 cells x 3 binds = 2,700 individual Tcl bind calls otherwise)
+        # - event.widget carries its (row, col) directly as an attribute.
         headers = ["Sr. No."] + [LABELS[k] for k in KEYS]
         for col, text in enumerate(headers):
             width_chars = 6 if col == 0 else CELL_WIDTH[KEYS[col - 1]]
-            ctk.CTkLabel(
+            tk.Label(
                 self.scroll,
-                text=text,
-                fg_color=theme.BG_CARD_ALT,
-                text_color=theme.TEXT_SECONDARY,
-                font=theme.font(11, "bold"),
-                wraplength=max(60, width_chars * 7),
+                text=_wrap_header(text, max(6, width_chars - 3)),
+                bg=theme.BG_CARD_ALT,
+                fg=theme.TEXT_SECONDARY,
+                font=(theme.FONT_FAMILY, 11, "bold"),
                 justify="center",
-                width=width_chars * 8,
-                height=48,
-                corner_radius=0,
+                width=width_chars,
             ).grid(row=0, column=col, sticky="nsew", padx=(0, 1), pady=(0, 1))
+
+        self.bind_class("GridEntry", "<Key>", self._on_key_event)
+        self.bind_class("GridEntry", "<Control-v>", self._on_paste_event)
+        self.bind_class("GridEntry", "<Control-V>", self._on_paste_event)
 
         for r in range(1, MAX_GRID_ROWS + 1):
             row_entries = []
             row_bg = theme.BG_CARD if r % 2 else theme.BG_ROW_ALT
-            ctk.CTkLabel(
+            tk.Label(
                 self.scroll,
                 text=str(r),
-                fg_color=row_bg,
-                text_color=theme.TEXT_MUTED,
-                font=theme.small_font(),
-                width=48,
-                height=30,
+                bg=row_bg,
+                fg=theme.TEXT_MUTED,
+                font=(theme.FONT_FAMILY, 11),
+                width=6,
             ).grid(row=r, column=0, sticky="nsew", padx=(0, 1), pady=(0, 1))
 
             for c in range(len(KEYS)):
@@ -120,11 +150,18 @@ class GridTab(ctk.CTkFrame):
                     width=CELL_WIDTH[KEYS[c]],
                 )
                 entry.grid(row=r, column=c + 1, sticky="nsew", padx=(0, 1), pady=(0, 1), ipady=5)
-                entry.bind("<Key>", lambda ev, rr=r - 1, cc=c: self._on_key(ev, rr, cc))
-                entry.bind("<Control-v>", lambda ev, rr=r - 1, cc=c: self._on_paste(ev, rr, cc))
-                entry.bind("<Control-V>", lambda ev, rr=r - 1, cc=c: self._on_paste(ev, rr, cc))
+                entry.bindtags(("GridEntry",) + entry.bindtags())
+                entry._grid_pos = (r - 1, c)
                 row_entries.append(entry)
             self.entries.append(row_entries)
+
+    def _on_key_event(self, event):
+        row, col = event.widget._grid_pos
+        return self._on_key(event, row, col)
+
+    def _on_paste_event(self, event):
+        row, col = event.widget._grid_pos
+        return self._on_paste(event, row, col)
 
     # --------------------------------------------------------- navigation --
     def _on_key(self, event, row, col):

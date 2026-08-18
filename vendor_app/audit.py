@@ -35,7 +35,27 @@ class AuditLog:
                     self._entries.append({col: row.get(col, "") for col in AUDIT_COLUMNS})
 
     def record(self, vendor_code: str, vendor_name: str, action: str, details: str) -> dict:
-        entry = {
+        entry = self._make_entry(vendor_code, vendor_name, action, details)
+        with self._lock:
+            self._entries.append(entry)
+            self._append_to_disk([entry])
+        return entry
+
+    def record_many(self, records: list) -> list:
+        """Append several entries in one disk write. `records` is a list of
+        (vendor_code, vendor_name, action, details) tuples - used by
+        VendorStore.bulk_upsert() so a 100-row grid save opens the audit
+        log file once instead of up to 100 times."""
+        entries = [self._make_entry(*r) for r in records]
+        if not entries:
+            return entries
+        with self._lock:
+            self._entries.extend(entries)
+            self._append_to_disk(entries)
+        return entries
+
+    def _make_entry(self, vendor_code: str, vendor_name: str, action: str, details: str) -> dict:
+        return {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "vendor_code": vendor_code,
             "vendor_name": vendor_name,
@@ -43,19 +63,15 @@ class AuditLog:
             "details": details,
             "actor": current_actor(),
         }
-        with self._lock:
-            self._entries.append(entry)
-            self._append_to_disk(entry)
-        return entry
 
-    def _append_to_disk(self, entry: dict):
+    def _append_to_disk(self, entries: list):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         write_header = not os.path.exists(self.path) or os.path.getsize(self.path) == 0
         with open(self.path, "a", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=AUDIT_COLUMNS)
             if write_header:
                 writer.writeheader()
-            writer.writerow(entry)
+            writer.writerows(entries)
 
     def all_entries(self) -> list:
         """Most-recent-first, as an audit trail is read newest-on-top."""

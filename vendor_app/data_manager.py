@@ -57,6 +57,46 @@ class VendorStore:
         df.to_csv(self.path, index=False)
 
     # ------------------------------------------------------------ Writes --
+    def _apply_upsert(self, raw_record: dict, status: str = None):
+        """Validate + merge `raw_record` into memory ONLY - no disk write,
+        no audit call. Shared by upsert() (single write, saves once) and
+        bulk_upsert() (many writes, saves once at the end) so a 100-row
+        grid save doesn't rewrite the entire CSV 100 times.
+
+        Returns (result, audit_action, audit_details, vendor_name), where
+        audit_action/audit_details are None if nothing actually changed
+        (e.g. an update with no non-blank fields and no status change).
+        Caller must hold self._lock.
+        """
+        cleaned = validate_record(raw_record)
+        code = cleaned["vendor_code"]
+        now = _now()
+
+        if code in self._records:
+            existing = self._records[code]
+            changes = []
+            for key in KEYS:
+                if key == "vendor_code":
+                    continue
+                if cleaned[key] and cleaned[key] != existing.get(key, ""):
+                    changes.append(f"{LABELS[key]}: '{existing.get(key, '')}' -> '{cleaned[key]}'")
+                    existing[key] = cleaned[key]
+            if status and status in STATUS_VALUES and status != existing.get("status"):
+                changes.append(f"Status: '{existing.get('status', STATUS_DEFAULT)}' -> '{status}'")
+                existing["status"] = status
+            if changes:
+                existing["updated_at"] = now
+            audit_action = "Updated" if changes else None
+            audit_details = "; ".join(changes) if changes else None
+            return "updated", audit_action, audit_details, existing.get("vendor_name", "")
+
+        cleaned["status"] = status if status in STATUS_VALUES else STATUS_DEFAULT
+        cleaned["created_at"] = now
+        cleaned["updated_at"] = now
+        self._records[code] = cleaned
+        self._order.append(code)
+        return "added", "Added", "New vendor record created", cleaned.get("vendor_name", "")
+
     def upsert(self, raw_record: dict, status: str = None) -> str:
         """Validate `raw_record` and insert/merge it by Vendor Code.
 
@@ -69,43 +109,13 @@ class VendorStore:
         Every write is recorded to the audit trail with a field-level diff.
         Returns "added" or "updated".
         """
-        cleaned = validate_record(raw_record)
-        code = cleaned["vendor_code"]
-        now = _now()
-
         with self._lock:
-            if code in self._records:
-                existing = self._records[code]
-                changes = []
-                for key in KEYS:
-                    if key == "vendor_code":
-                        continue
-                    if cleaned[key] and cleaned[key] != existing.get(key, ""):
-                        changes.append(f"{LABELS[key]}: '{existing.get(key, '')}' -> '{cleaned[key]}'")
-                        existing[key] = cleaned[key]
-                if status and status in STATUS_VALUES and status != existing.get("status"):
-                    changes.append(f"Status: '{existing.get('status', STATUS_DEFAULT)}' -> '{status}'")
-                    existing["status"] = status
-                if changes:
-                    existing["updated_at"] = now
-                result = "updated"
-                vendor_name_for_log = existing.get("vendor_name", "")
-            else:
-                cleaned["status"] = status if status in STATUS_VALUES else STATUS_DEFAULT
-                cleaned["created_at"] = now
-                cleaned["updated_at"] = now
-                self._records[code] = cleaned
-                self._order.append(code)
-                result = "added"
-                changes = None
-                vendor_name_for_log = cleaned.get("vendor_name", "")
+            code = normalize(raw_record.get("vendor_code", ""))
+            result, audit_action, audit_details, vendor_name = self._apply_upsert(raw_record, status)
             self.save()
 
-        if self.audit_log is not None:
-            if result == "added":
-                self.audit_log.record(code, vendor_name_for_log, "Added", "New vendor record created")
-            elif changes:
-                self.audit_log.record(code, vendor_name_for_log, "Updated", "; ".join(changes))
+        if self.audit_log is not None and audit_action:
+            self.audit_log.record(code, vendor_name, audit_action, audit_details)
         return result
 
     def bulk_upsert(self, raw_records: list) -> dict:
@@ -113,21 +123,35 @@ class VendorStore:
 
         Blank rows are silently skipped. Each failure is collected instead
         of aborting the whole batch, so a typo in row 42 never loses the
-        other 99 rows.
+        other 99 rows. The dataset is written to disk once at the end
+        (not once per row) so a 100-row save stays fast even against a
+        large existing master.
         """
         added = updated = 0
         errors = []
-        for idx, raw in enumerate(raw_records, start=1):
-            if is_blank_record(raw):
-                continue
-            try:
-                result = self.upsert(raw)
-                if result == "added":
-                    added += 1
-                else:
-                    updated += 1
-            except ValidationError as exc:
-                errors.append((idx, str(exc)))
+        audit_entries = []  # (vendor_code, vendor_name, action, details)
+
+        with self._lock:
+            for idx, raw in enumerate(raw_records, start=1):
+                if is_blank_record(raw):
+                    continue
+                try:
+                    code = normalize(raw.get("vendor_code", ""))
+                    result, audit_action, audit_details, vendor_name = self._apply_upsert(raw)
+                    if result == "added":
+                        added += 1
+                    else:
+                        updated += 1
+                    if audit_action:
+                        audit_entries.append((code, vendor_name, audit_action, audit_details))
+                except ValidationError as exc:
+                    errors.append((idx, str(exc)))
+            if added or updated:
+                self.save()
+
+        if self.audit_log is not None and audit_entries:
+            self.audit_log.record_many(audit_entries)
+
         return {"added": added, "updated": updated, "errors": errors}
 
     def set_status(self, code: str, status: str) -> bool:

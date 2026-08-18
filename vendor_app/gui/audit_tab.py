@@ -16,6 +16,7 @@ from vendor_app.validators import normalize
 from vendor_app.gui import theme
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
+from vendor_app.gui.util import debounce
 from vendor_app.gui.widgets import card, primary_button, pill
 
 ACTION_FILTERS = ["All Actions", "Added", "Updated", "Status Change", "Deleted"]
@@ -52,7 +53,9 @@ class AuditLogTab(ctk.CTkFrame):
             side="left", padx=(0, 8)
         )
         self.search_var = ctk.StringVar()
-        self.search_var.trace_add("write", lambda *args: self.refresh())
+        self.search_var.trace_add(
+            "write", lambda *args: debounce(self, "_search_after_id", 200, self.refresh)
+        )
         ctk.CTkEntry(
             toolbar,
             textvariable=self.search_var,

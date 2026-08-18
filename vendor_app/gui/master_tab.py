@@ -12,6 +12,7 @@ from vendor_app.gui import theme
 from vendor_app.gui.edit_dialog import EditVendorDialog
 from vendor_app.gui.style import build_table, insert_row, set_heading_text
 from vendor_app.gui.toast import notify
+from vendor_app.gui.util import debounce
 from vendor_app.gui.widgets import card, primary_button, secondary_button, danger_button, pill
 
 COLUMNS = ["sr_no"] + DISPLAY_COLUMNS
@@ -57,7 +58,9 @@ class MasterTab(ctk.CTkFrame):
             side="left", padx=(0, 8)
         )
         self.search_var = ctk.StringVar()
-        self.search_var.trace_add("write", lambda *args: self.refresh())
+        self.search_var.trace_add(
+            "write", lambda *args: debounce(self, "_search_after_id", 200, self.refresh)
+        )
         ctk.CTkEntry(
             toolbar,
             textvariable=self.search_var,
@@ -174,11 +177,19 @@ class MasterTab(ctk.CTkFrame):
 
         self.count_pill.configure(text=f"  {len(records)} record{'s' if len(records) != 1 else ''}  ")
 
-        all_records = self.store.all_records()
-        self.stat_total.configure(text=str(len(all_records)))
-        self.stat_active.configure(text=str(sum(1 for r in all_records if r.get("status") == "Active")))
-        self.stat_inactive.configure(text=str(sum(1 for r in all_records if r.get("status") == "Inactive")))
-        self.stat_blocked.configure(text=str(sum(1 for r in all_records if r.get("status") == "Blocked")))
+        # Single pass over all records for every stat, rather than one
+        # full pass per status (this ran on every keystroke before the
+        # search box was debounced, so it's worth keeping cheap).
+        counts = {"Active": 0, "Inactive": 0, "Blocked": 0}
+        total = 0
+        for r in self.store.all_records():
+            total += 1
+            status = r.get("status", "Active")
+            counts[status] = counts.get(status, 0) + 1
+        self.stat_total.configure(text=str(total))
+        self.stat_active.configure(text=str(counts["Active"]))
+        self.stat_inactive.configure(text=str(counts["Inactive"]))
+        self.stat_blocked.configure(text=str(counts["Blocked"]))
 
         self._update_toggle_label()
 
