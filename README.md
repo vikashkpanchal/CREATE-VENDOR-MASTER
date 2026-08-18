@@ -3,7 +3,9 @@
 A pure-Python desktop application for creating, importing, searching and
 maintaining a vendor master dataset, with clean Excel export.
 
-- **UI:** `customtkinter` (dark theme)
+- **UI:** `customtkinter` (dark theme) with a consistent design system —
+  branded header, cobalt accent, card layout, stat tiles, wrapped
+  two-line table headers, zebra-striped rows (`vendor_app/gui/theme.py`)
 - **Data processing / export:** `pandas` + `openpyxl`
 - **Storage:** local CSV under `data/` (internal only — the app is what you
   export to `.xlsx` from, not the other way around)
@@ -48,25 +50,41 @@ Every vendor record uses this exact field order:
 
 ## Tabs
 
-### 1. Import & Update Grid
-An Excel-like grid (100 rows max, for smooth, lag-free bulk entry) with
-wrapped column headers. Paste directly from Excel with `Ctrl+V`; navigate
-cells with the arrow keys, `Tab`, and `Enter`. "Save Grid to Master"
-validates every non-blank row and upserts it into the master dataset,
-reporting how many were added/updated and listing any row-level errors.
+Tab order matches day-to-day use: look someone up first, browse the
+directory second, and reach for bulk import only when onboarding or
+refreshing many vendors at once.
 
-### 2. Search Vendor Details
+### 1. Search Vendor Details
 - **Single Vendor Search** — enter one Vendor Code to view a full profile
-  card, with an "Edit This Vendor Record" button to update it in place.
+  card (grouped into Vendor / Owner / Supervisor sections), with an "Edit
+  This Vendor Record" button to update it in place.
 - **Multi Vendor Search** — paste/enter a list of Vendor Codes (one per
   line) to see all matches side-by-side in a table, with an "Export Search
   Results (.xlsx)" button.
 
-### 3. Master Data Records
-The full vendor directory with a live search bar that filters by name or
-code as you type. Double-click a row (or select it and click "Edit
-Selected") to edit it. "Export All (.xlsx)" writes every record to a
-formatted spreadsheet.
+### 2. Master Data Records
+The full vendor directory, led by a stat strip (Total Vendors, With Owner
+Contact, With Supervisor Contact, With Multiple Emails), with a live
+search bar that filters by name or code as you type. Double-click a row
+(or select it and click "Edit Selected") to edit it. "Export All (.xlsx)"
+writes every record to a formatted spreadsheet.
+
+### 3. Import & Update Grid
+An Excel-like grid (100 rows max, for smooth, lag-free bulk entry) with
+wrapped, zebra-striped rows. Paste directly from Excel with `Ctrl+V`;
+navigate cells with the arrow keys, `Tab`, and `Enter`. "Save Grid to
+Master" validates every non-blank row and upserts it into the master
+dataset, reporting how many were added/updated and listing any row-level
+errors.
+
+## Tables
+
+Master Data Records and Multi Vendor Search results both use the same
+themed table component (`vendor_app/gui/style.py`): headers are always
+pre-wrapped onto two clean lines and never truncated or hidden, rows are
+zebra-striped for readability, and both a vertical and a horizontal
+scrollbar are always available so wide tables scroll into view instead of
+squeezing columns unreadably thin.
 
 ## Excel export layout
 
@@ -80,16 +98,20 @@ Headers are bold, wrapped, and the header row is frozen.
 ```
 main.py                      entry point
 vendor_app/
-  config.py                  field keys/labels, storage path, grid row cap
+  config.py                  field keys/labels, storage path, grid row cap,
+                              wrapped table headers, column widths
   validators.py               field & record validation rules
   data_manager.py             VendorStore: load/save, upsert/merge, search
   export.py                   dynamic-column .xlsx export
   gui/
-    main_window.py            app shell, 3-tab layout
-    grid_tab.py                Tab 1 — bulk entry grid
-    search_tab.py               Tab 2 — single/multi search
-    master_tab.py                Tab 3 — master directory
-    edit_dialog.py               shared add/edit record dialog
-    style.py                     dark ttk.Treeview styling
+    theme.py                   design tokens: colors, fonts, spacing
+    widgets.py                  reusable buttons/badges/cards
+    style.py                     themed Treeview + wrapped headers + scrollbars
+    scroll_canvas.py             2-axis scrollable canvas (bulk grid)
+    main_window.py               app shell, branded header, 3-tab layout
+    search_tab.py                 Tab 1 — single/multi search
+    master_tab.py                  Tab 2 — master directory + stat strip
+    grid_tab.py                     Tab 3 — bulk entry grid
+    edit_dialog.py                   shared add/edit record dialog
 data/                         local CSV store (git-ignored)
 ```

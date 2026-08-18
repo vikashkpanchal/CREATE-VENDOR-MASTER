@@ -39,6 +39,39 @@ LABELS = {
     "vendor_supervisor_email": "Vendor Supervisor Email ID",
 }
 
+# Two-line wrapped header text for Treeview-based tables (Master Data
+# Records, Multi Vendor Search results). Deliberately pre-wrapped rather
+# than auto word-wrapped, so every header renders exactly two clean lines
+# and is never clipped or truncated.
+WRAPPED_LABELS = {
+    "sr_no": "Sr.\nNo.",
+    "vendor_code": "Vendor\nCode",
+    "vendor_name": "Vendor\nName",
+    "vendor_email": "Vendor Email\nID",
+    "vendor_owner_name": "Vendor Owner\nName",
+    "vendor_owner_contact": "Vendor Owner\nContact Number",
+    "vendor_owner_email": "Vendor Owner\nEmail ID",
+    "vendor_supervisor_name": "Vendor Supervisor\nContact Name",
+    "vendor_supervisor_contact": "Vendor Supervisor\nContact Number",
+    "vendor_supervisor_email": "Vendor Supervisor\nEmail ID",
+}
+
+# Per-column pixel widths, sized so the wrapped two-line header above always
+# fits on-screen without truncation. Tables scroll horizontally beyond this,
+# rather than squeezing columns until headers/content become unreadable.
+COLUMN_WIDTHS = {
+    "sr_no": 64,
+    "vendor_code": 110,
+    "vendor_name": 260,
+    "vendor_email": 300,
+    "vendor_owner_name": 170,
+    "vendor_owner_contact": 170,
+    "vendor_owner_email": 200,
+    "vendor_supervisor_name": 190,
+    "vendor_supervisor_contact": 180,
+    "vendor_supervisor_email": 200,
+}
+
 # Fields that must contain digits only when provided.
 NUMERIC_FIELDS = {"vendor_code", "vendor_owner_contact", "vendor_supervisor_contact"}
 
