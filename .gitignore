@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Local vendor data store and any ad-hoc exports - not committed.
+data/*.csv
+*.xlsx
+!data/.gitkeep
+
+.DS_Store
