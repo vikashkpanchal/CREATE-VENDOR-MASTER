@@ -1,16 +1,19 @@
-"""Top-level application window: branded header + 3-tab layout.
+"""Top-level application window: branded header + 4-tab layout.
 
-Tab order is Search -> Master -> Import & Update Grid, matching how the
-app is actually used day to day: look someone up first, browse the
-directory second, and reach for bulk import only when onboarding or
-refreshing many vendors at once.
+Tab order is Search -> Master -> Import & Update Grid -> Audit Log,
+matching how the app is actually used day to day: look someone up first,
+browse the directory second, reach for bulk import when onboarding or
+refreshing many vendors at once, and check the audit trail when you need
+to know who changed what and when.
 """
 
 import customtkinter as ctk
 
-from vendor_app.config import APP_TITLE
+from vendor_app.config import APP_TITLE, AUDIT_FILE
+from vendor_app.audit import AuditLog
 from vendor_app.data_manager import VendorStore
 from vendor_app.gui import theme
+from vendor_app.gui.audit_tab import AuditLogTab
 from vendor_app.gui.grid_tab import GridTab
 from vendor_app.gui.search_tab import SearchTab
 from vendor_app.gui.master_tab import MasterTab
@@ -27,7 +30,8 @@ class MainWindow(ctk.CTk):
         self.geometry("1440x860")
         self.minsize(1150, 680)
 
-        self.store = VendorStore()
+        self.audit_log = AuditLog(AUDIT_FILE)
+        self.store = VendorStore(audit_log=self.audit_log)
 
         self._build_header()
 
@@ -51,6 +55,7 @@ class MainWindow(ctk.CTk):
         tab_search = self.tabview.add("Search Vendor Details")
         tab_master = self.tabview.add("Master Data Records")
         tab_grid = self.tabview.add("Import & Update Grid")
+        tab_audit = self.tabview.add("Audit Log")
 
         self.search_tab = SearchTab(tab_search, self.store, on_data_changed=self.refresh_all)
         self.search_tab.pack(fill="both", expand=True)
@@ -60,6 +65,9 @@ class MainWindow(ctk.CTk):
 
         self.grid_tab = GridTab(tab_grid, self.store, on_data_changed=self.refresh_all)
         self.grid_tab.pack(fill="both", expand=True)
+
+        self.audit_tab = AuditLogTab(tab_audit, self.audit_log)
+        self.audit_tab.pack(fill="both", expand=True)
 
         self.tabview.set("Search Vendor Details")
         self.refresh_all()
@@ -97,7 +105,9 @@ class MainWindow(ctk.CTk):
         self.record_badge.pack(side="right", pady=17)
 
     def refresh_all(self):
-        """Called after any write (grid save / edit dialog) to keep views in sync."""
+        """Called after any write (grid save / edit dialog / status change /
+        delete) to keep every tab in sync."""
         self.master_tab.refresh()
-        count = len(self.store)
-        self.record_badge.configure(text=f"  {count} Active Vendor{'s' if count != 1 else ''}  ")
+        self.audit_tab.refresh()
+        active = sum(1 for r in self.store.all_records() if r.get("status") == "Active")
+        self.record_badge.configure(text=f"  {active} Active Vendor{'s' if active != 1 else ''}  ")

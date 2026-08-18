@@ -83,3 +83,18 @@ def export_records_to_excel(records: list, path: str) -> str:
         df.to_excel(writer, index=False, sheet_name=SHEET_NAME)
         _style_worksheet(writer.sheets[SHEET_NAME], list(df.columns))
     return path
+
+
+def export_audit_log_to_excel(entries: list, path: str) -> str:
+    """Write audit trail `entries` (most-recent-first dicts, see audit.py)
+    to a formatted .xlsx workbook at `path`. Returns path."""
+    from vendor_app.config import AUDIT_COLUMNS, AUDIT_WRAPPED_LABELS
+
+    headers = [AUDIT_WRAPPED_LABELS.get(col, col).replace("\n", " ") for col in AUDIT_COLUMNS]
+    rows = [{headers[i]: entry.get(col, "") for i, col in enumerate(AUDIT_COLUMNS)} for entry in entries]
+    df = pd.DataFrame(rows, columns=headers)
+
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Audit Log")
+        _style_worksheet(writer.sheets["Audit Log"], headers)
+    return path

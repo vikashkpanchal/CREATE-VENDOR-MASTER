@@ -1,18 +1,20 @@
-"""Master Data Records: full directory, live filter, editor, export."""
+"""Master Data Records: full directory, live filter, status lifecycle,
+sortable columns, editor, export."""
 
 from datetime import datetime
 from tkinter import messagebox, filedialog
 
 import customtkinter as ctk
 
-from vendor_app.config import KEYS, WRAPPED_LABELS, COLUMN_WIDTHS
+from vendor_app.config import DISPLAY_COLUMNS, STATUS_VALUES, WRAPPED_LABELS, COLUMN_WIDTHS
 from vendor_app.export import export_records_to_excel
 from vendor_app.gui import theme
 from vendor_app.gui.edit_dialog import EditVendorDialog
-from vendor_app.gui.style import build_table, stripe_rows
-from vendor_app.gui.widgets import card, primary_button, secondary_button, pill
+from vendor_app.gui.style import build_table, insert_row, set_heading_text
+from vendor_app.gui.toast import notify
+from vendor_app.gui.widgets import card, primary_button, secondary_button, danger_button, pill
 
-COLUMNS = ["sr_no"] + KEYS
+COLUMNS = ["sr_no"] + DISPLAY_COLUMNS
 
 
 class MasterTab(ctk.CTkFrame):
@@ -20,6 +22,8 @@ class MasterTab(ctk.CTkFrame):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.store = store
         self.on_data_changed = on_data_changed
+        self._sort_key = None
+        self._sort_desc = False
         self._build()
         self.refresh()
 
@@ -34,13 +38,14 @@ class MasterTab(ctk.CTkFrame):
         ).pack(anchor="w")
         ctk.CTkLabel(
             left,
-            text="The complete vendor directory - filter, review and edit any record.",
+            text="The complete vendor directory - filter, sort, review and edit any record.",
             font=theme.small_font(),
             text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
         actions.pack(side="right")
+        primary_button(actions, "+ Add Vendor", self.add_vendor, width=140).pack(side="left", padx=(0, 8))
         secondary_button(actions, "Edit Selected", self.edit_selected).pack(side="left", padx=(0, 8))
         primary_button(actions, "Export All (.xlsx)", self.export_all, width=170).pack(side="left")
 
@@ -57,31 +62,60 @@ class MasterTab(ctk.CTkFrame):
             toolbar,
             textvariable=self.search_var,
             placeholder_text="Search by Vendor Name or Vendor Code...",
-            width=340,
+            width=300,
             height=32,
             fg_color=theme.BG_INPUT,
             border_color=theme.BG_INPUT_BORDER,
         ).pack(side="left")
+
+        ctk.CTkLabel(toolbar, text="Status:", font=theme.small_font(), text_color=theme.TEXT_SECONDARY).pack(
+            side="left", padx=(16, 8)
+        )
+        self.status_filter = ctk.StringVar(value="All")
+        ctk.CTkOptionMenu(
+            toolbar,
+            variable=self.status_filter,
+            values=["All"] + STATUS_VALUES,
+            command=lambda *_: self.refresh(),
+            width=130,
+            height=32,
+            fg_color=theme.BG_INPUT,
+            button_color=theme.BG_CARD_ALT,
+            button_hover_color=theme.BG_HOVER,
+            dropdown_fg_color=theme.BG_CARD_ALT,
+        ).pack(side="left")
+
         self.count_pill = pill(toolbar, "0 records")
         self.count_pill.pack(side="left", padx=12)
+
+        row_actions = ctk.CTkFrame(toolbar, fg_color="transparent")
+        row_actions.pack(side="right")
+        danger_button(row_actions, "Delete Permanently", self.delete_selected, width=170).pack(
+            side="left", padx=(8, 0)
+        )
+        self.toggle_status_btn = secondary_button(
+            row_actions, "Deactivate Selected", self.toggle_status_selected, width=170
+        )
+        self.toggle_status_btn.pack(side="left")
 
         table_wrap = card(self, fg_color=theme.BG_CARD)
         table_wrap.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         table_wrap.grid_rowconfigure(0, weight=1)
         table_wrap.grid_columnconfigure(0, weight=1)
 
-        outer, self.tree = build_table(table_wrap, COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS)
+        outer, self.tree = build_table(table_wrap, COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS, on_sort=self._on_sort)
         outer.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
+        self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_toggle_label())
 
     def _build_stat_strip(self):
         strip = ctk.CTkFrame(self, fg_color="transparent")
         strip.pack(fill="x", padx=20, pady=(0, 14))
 
         self.stat_total = self._stat_card(strip, "Total Vendors")
-        self.stat_owner = self._stat_card(strip, "With Owner Contact")
-        self.stat_supervisor = self._stat_card(strip, "With Supervisor Contact")
-        self.stat_multi_email = self._stat_card(strip, "With Multiple Emails")
+        self.stat_active = self._stat_card(strip, "🟢 Active")
+        self.stat_inactive = self._stat_card(strip, "⚪ Inactive")
+        self.stat_blocked = self._stat_card(strip, "🔴 Blocked")
 
     def _stat_card(self, parent, title):
         box = card(parent, fg_color=theme.BG_CARD)
@@ -93,47 +127,120 @@ class MasterTab(ctk.CTkFrame):
         value_label.pack(anchor="w", padx=16, pady=(0, 14))
         return value_label
 
-    def refresh(self):
-        from vendor_app.validators import split_emails
+    # ------------------------------------------------------------ sorting --
+    def _on_sort(self, key):
+        if key == "sr_no":
+            return
+        if self._sort_key == key:
+            self._sort_desc = not self._sort_desc
+        else:
+            self._sort_key = key
+            self._sort_desc = False
+        self.refresh()
 
+    def _row_values(self, record):
+        values = []
+        for key in DISPLAY_COLUMNS:
+            if key == "status":
+                values.append(theme.format_status(record.get("status", "Active")))
+            else:
+                values.append(record.get(key, ""))
+        return values
+
+    # ------------------------------------------------------------ refresh --
+    def refresh(self):
         query = self.search_var.get() if hasattr(self, "search_var") else ""
-        records = self.store.search(query)
+        status = self.status_filter.get() if hasattr(self, "status_filter") else "All"
+        records = self.store.search(query, status=status)
+
+        if self._sort_key:
+            records = sorted(
+                records, key=lambda r: r.get(self._sort_key, "").lower(), reverse=self._sort_desc
+            )
+
+        selected_code = self._selected_code()
 
         for row in self.tree.get_children():
             self.tree.delete(row)
         for i, record in enumerate(records, start=1):
-            self.tree.insert(
-                "", "end", iid=record["vendor_code"], values=[i] + [record.get(k, "") for k in KEYS]
+            insert_row(
+                self.tree, i - 1, status=record.get("status", "Active"),
+                iid=record["vendor_code"], values=[i] + self._row_values(record),
             )
-        stripe_rows(self.tree)
+        set_heading_text(self.tree, COLUMNS, WRAPPED_LABELS, self._sort_key, self._sort_desc)
+
+        if selected_code and self.tree.exists(selected_code):
+            self.tree.selection_set(selected_code)
 
         self.count_pill.configure(text=f"  {len(records)} record{'s' if len(records) != 1 else ''}  ")
 
         all_records = self.store.all_records()
-        total = len(all_records)
-        with_owner = sum(1 for r in all_records if r.get("vendor_owner_contact"))
-        with_supervisor = sum(1 for r in all_records if r.get("vendor_supervisor_contact"))
-        with_multi_email = sum(1 for r in all_records if len(split_emails(r.get("vendor_email", ""))) > 1)
+        self.stat_total.configure(text=str(len(all_records)))
+        self.stat_active.configure(text=str(sum(1 for r in all_records if r.get("status") == "Active")))
+        self.stat_inactive.configure(text=str(sum(1 for r in all_records if r.get("status") == "Inactive")))
+        self.stat_blocked.configure(text=str(sum(1 for r in all_records if r.get("status") == "Blocked")))
 
-        self.stat_total.configure(text=str(total))
-        self.stat_owner.configure(text=str(with_owner))
-        self.stat_supervisor.configure(text=str(with_supervisor))
-        self.stat_multi_email.configure(text=str(with_multi_email))
+        self._update_toggle_label()
+
+    def _selected_code(self):
+        selection = self.tree.selection()
+        return selection[0] if selection else None
+
+    def _update_toggle_label(self):
+        code = self._selected_code()
+        record = self.store.get(code) if code else None
+        if record and record.get("status") == "Inactive":
+            self.toggle_status_btn.configure(text="Reactivate Selected")
+        else:
+            self.toggle_status_btn.configure(text="Deactivate Selected")
+
+    # ------------------------------------------------------------ actions --
+    def add_vendor(self):
+        EditVendorDialog(self, self.store, record=None, on_saved=self._after_edit)
 
     def edit_selected(self):
-        selection = self.tree.selection()
-        if not selection:
+        code = self._selected_code()
+        if not code:
             messagebox.showinfo("Select a Row", "Select a vendor row first (or double-click it).")
             return
-
-        code = selection[0]
         record = self.store.get(code)
         if not record:
             messagebox.showerror("Not Found", "This vendor record no longer exists.")
             self.refresh()
             return
-
         EditVendorDialog(self, self.store, record, on_saved=self._after_edit)
+
+    def toggle_status_selected(self):
+        code = self._selected_code()
+        if not code:
+            messagebox.showinfo("Select a Row", "Select a vendor row first.")
+            return
+        record = self.store.get(code)
+        if not record:
+            return
+        new_status = "Active" if record.get("status") == "Inactive" else "Inactive"
+        self.store.set_status(code, new_status)
+        notify(self, f"Vendor {code} is now {new_status}.", kind="info")
+        self._after_edit()
+
+    def delete_selected(self):
+        code = self._selected_code()
+        if not code:
+            messagebox.showinfo("Select a Row", "Select a vendor row first.")
+            return
+        record = self.store.get(code)
+        if not record:
+            return
+        confirmed = messagebox.askyesno(
+            "Delete Permanently",
+            f"Permanently delete vendor {code} - {record.get('vendor_name') or '(no name)'}?\n\n"
+            "This cannot be undone. Consider Deactivate instead if you may need this record again.",
+        )
+        if not confirmed:
+            return
+        self.store.delete(code)
+        notify(self, f"Vendor {code} deleted.", kind="error")
+        self._after_edit()
 
     def _after_edit(self):
         if self.on_data_changed:
@@ -154,4 +261,4 @@ class MasterTab(ctk.CTkFrame):
             return
 
         export_records_to_excel(records, path)
-        messagebox.showinfo("Exported", f"Master data exported to:\n{path}")
+        notify(self, f"Master data exported to:\n{path}", kind="success")

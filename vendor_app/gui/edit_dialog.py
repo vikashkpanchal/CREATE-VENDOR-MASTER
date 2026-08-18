@@ -1,16 +1,18 @@
 """Modal dialog for adding a new vendor or editing an existing one.
 
 Reused by both the Search tab ("Edit This Vendor Record") and the Master
-Data tab ("Edit Selected" / double-click). Saves go through
-VendorStore.upsert, so the same cell-level merge rules apply everywhere.
+Data tab ("Edit Selected" / double-click / "+ Add Vendor"). Saves go
+through VendorStore.upsert, so the same cell-level merge rules apply
+everywhere. Lifecycle status (Active/Inactive/Blocked) is edited here too.
 """
 
 import customtkinter as ctk
 from tkinter import messagebox
 
-from vendor_app.config import LABELS
+from vendor_app.config import LABELS, STATUS_VALUES, STATUS_DEFAULT
 from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
+from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
 
 SECTIONS = [
@@ -30,12 +32,13 @@ class EditVendorDialog(ctk.CTkToplevel):
 
         self.configure(fg_color=theme.BG_SURFACE)
         self.title("Add Vendor Record" if self.is_new else "Edit Vendor Record")
-        self.geometry("560x680")
-        self.minsize(480, 520)
+        self.geometry("560x740")
+        self.minsize(480, 560)
         self.transient(master)
         self.grab_set()
 
         self.vars = {}
+        self.status_var = ctk.StringVar(value=self.record.get("status") or STATUS_DEFAULT)
         self._first_entry = None
         self._build_form()
         self.after(50, self._focus_first_field)
@@ -92,6 +95,26 @@ class EditVendorDialog(ctk.CTkToplevel):
                     self._first_entry = entry
 
                 self.vars[key] = var
+
+            if title == "VENDOR":
+                status_row = ctk.CTkFrame(box, fg_color="transparent")
+                status_row.pack(fill="x", padx=18, pady=6)
+                ctk.CTkLabel(
+                    status_row, text="Status", width=210, anchor="w", font=theme.body_font(),
+                    text_color=theme.TEXT_SECONDARY,
+                ).pack(side="left")
+                ctk.CTkOptionMenu(
+                    status_row,
+                    variable=self.status_var,
+                    values=STATUS_VALUES,
+                    width=200,
+                    height=32,
+                    fg_color=theme.BG_INPUT,
+                    button_color=theme.BG_CARD_ALT,
+                    button_hover_color=theme.BG_HOVER,
+                    dropdown_fg_color=theme.BG_CARD_ALT,
+                ).pack(side="left")
+
             ctk.CTkFrame(box, fg_color="transparent", height=6).pack()
 
         buttons = ctk.CTkFrame(self, fg_color="transparent")
@@ -109,12 +132,14 @@ class EditVendorDialog(ctk.CTkToplevel):
             raw["vendor_code"] = self.record["vendor_code"]
 
         try:
-            result = self.store.upsert(raw)
+            result = self.store.upsert(raw, status=self.status_var.get())
         except ValidationError as exc:
             messagebox.showerror("Validation Error", str(exc), parent=self)
             return
 
-        messagebox.showinfo("Saved", f"Vendor {raw['vendor_code']} {result}.", parent=self)
         if self.on_saved:
             self.on_saved()
         self.destroy()
+        # Toast anchors to the still-open parent window; the dialog itself
+        # is already gone by the time it fades in.
+        notify(self.master, f"Vendor {raw['vendor_code']} {result}.")

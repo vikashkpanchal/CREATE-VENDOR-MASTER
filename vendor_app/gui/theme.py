@@ -78,3 +78,25 @@ def label_font():
 
 def mono_font(size: int = 12):
     return ctk.CTkFont(family="Consolas", size=size)
+
+
+# ------------------------------------------------------------- lifecycle --
+# Colored-dot emoji carry their own color regardless of theme/ttk tag
+# quirks, so a vendor's lifecycle status reads clearly in any table cell
+# without needing per-cell foreground styling tricks.
+STATUS_ICONS = {"Active": "🟢", "Inactive": "⚪", "Blocked": "🔴"}
+
+STATUS_COLORS = {
+    "Active": (SUCCESS_SOFT, SUCCESS),
+    "Inactive": (BG_CARD_ALT, TEXT_SECONDARY),
+    "Blocked": (DANGER_SOFT, DANGER),
+}
+
+
+def format_status(status: str) -> str:
+    status = status or "Active"
+    return f"{STATUS_ICONS.get(status, '⚪')} {status}"
+
+
+def status_colors(status: str):
+    return STATUS_COLORS.get(status, STATUS_COLORS["Active"])

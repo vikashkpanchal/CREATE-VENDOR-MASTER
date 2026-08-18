@@ -5,13 +5,14 @@ from tkinter import messagebox, filedialog
 
 import customtkinter as ctk
 
-from vendor_app.config import KEYS, WRAPPED_LABELS, COLUMN_WIDTHS
+from vendor_app.config import DISPLAY_COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS
 from vendor_app.export import export_records_to_excel
 from vendor_app.validators import split_emails, normalize
 from vendor_app.gui import theme
 from vendor_app.gui.edit_dialog import EditVendorDialog
-from vendor_app.gui.style import build_table, stripe_rows
-from vendor_app.gui.widgets import card, divider, pill, primary_button, section_label
+from vendor_app.gui.style import build_table, insert_row, set_heading_text
+from vendor_app.gui.toast import notify
+from vendor_app.gui.widgets import card, divider, pill, primary_button, secondary_button, section_label
 
 
 class SearchTab(ctk.CTkFrame):
@@ -20,6 +21,8 @@ class SearchTab(ctk.CTkFrame):
         self.store = store
         self.on_data_changed = on_data_changed
         self.multi_results = []
+        self._multi_sort_key = None
+        self._multi_sort_desc = False
 
         self._build_mode_switch()
         self.single_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -139,7 +142,13 @@ class SearchTab(ctk.CTkFrame):
             text_color=theme.TEXT_PRIMARY,
             anchor="w",
         ).pack(anchor="w")
-        pill(text_col, f"Code: {record.get('vendor_code')}").pack(anchor="w", pady=(6, 0))
+
+        badge_row = ctk.CTkFrame(text_col, fg_color="transparent")
+        badge_row.pack(anchor="w", pady=(6, 0))
+        pill(badge_row, f"Code: {record.get('vendor_code')}").pack(side="left")
+        status = record.get("status", "Active")
+        bg, fg = theme.status_colors(status)
+        pill(badge_row, theme.format_status(status), fg=bg, tc=fg).pack(side="left", padx=(8, 0))
 
         self._info_section(self.card_frame, "Vendor", [
             ("Vendor Code", record.get("vendor_code")),
@@ -158,9 +167,13 @@ class SearchTab(ctk.CTkFrame):
             ("Vendor Supervisor Email ID", record.get("vendor_supervisor_email")),
         ])
 
-        primary_button(
-            self.card_frame, "Edit This Vendor Record", lambda: self._edit(record), width=210
-        ).pack(anchor="w", pady=(4, 20))
+        actions = ctk.CTkFrame(self.card_frame, fg_color="transparent")
+        actions.pack(anchor="w", pady=(4, 20))
+        primary_button(actions, "Edit This Vendor Record", lambda: self._edit(record), width=210).pack(
+            side="left", padx=(0, 8)
+        )
+        toggle_label = "Reactivate" if record.get("status") == "Inactive" else "Deactivate"
+        secondary_button(actions, toggle_label, lambda: self._toggle_status(record), width=140).pack(side="left")
 
     def _email_rows(self, label, value):
         emails = split_emails(value)
@@ -194,6 +207,12 @@ class SearchTab(ctk.CTkFrame):
 
     def _edit(self, record):
         EditVendorDialog(self, self.store, record, on_saved=self._after_edit)
+
+    def _toggle_status(self, record):
+        new_status = "Active" if record.get("status") == "Inactive" else "Inactive"
+        self.store.set_status(record["vendor_code"], new_status)
+        notify(self, f"Vendor {record['vendor_code']} is now {new_status}.", kind="info")
+        self._after_edit()
 
     def _after_edit(self):
         if self.on_data_changed:
@@ -231,8 +250,44 @@ class SearchTab(ctk.CTkFrame):
             side="right"
         )
 
-        outer, self.multi_tree = build_table(right, KEYS, WRAPPED_LABELS, COLUMN_WIDTHS)
+        outer, self.multi_tree = build_table(
+            right, DISPLAY_COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS, on_sort=self._on_multi_sort
+        )
         outer.grid(row=1, column=0, sticky="nsew")
+
+    def _multi_row_values(self, record):
+        values = []
+        for key in DISPLAY_COLUMNS:
+            if key == "status":
+                values.append(theme.format_status(record.get("status", "Active")))
+            else:
+                values.append(record.get(key, ""))
+        return values
+
+    def _on_multi_sort(self, key):
+        if self._multi_sort_key == key:
+            self._multi_sort_desc = not self._multi_sort_desc
+        else:
+            self._multi_sort_key = key
+            self._multi_sort_desc = False
+        self._populate_multi_tree()
+
+    def _populate_multi_tree(self):
+        records = self.multi_results
+        if self._multi_sort_key:
+            records = sorted(
+                records, key=lambda r: r.get(self._multi_sort_key, "").lower(), reverse=self._multi_sort_desc
+            )
+        for row in self.multi_tree.get_children():
+            self.multi_tree.delete(row)
+        for i, record in enumerate(records):
+            insert_row(
+                self.multi_tree, i, status=record.get("status", "Active"),
+                iid=record["vendor_code"], values=self._multi_row_values(record),
+            )
+        set_heading_text(
+            self.multi_tree, DISPLAY_COLUMNS, WRAPPED_LABELS, self._multi_sort_key, self._multi_sort_desc
+        )
 
     def do_multi_search(self):
         raw = self.multi_text.get("1.0", "end")
@@ -245,12 +300,7 @@ class SearchTab(ctk.CTkFrame):
 
         found, missing = self.store.get_many(codes)
         self.multi_results = found
-
-        for row in self.multi_tree.get_children():
-            self.multi_tree.delete(row)
-        for record in found:
-            self.multi_tree.insert("", "end", values=[record.get(k, "") for k in KEYS])
-        stripe_rows(self.multi_tree)
+        self._populate_multi_tree()
 
         status = f"Found {len(found)} of {len(codes)} vendor code(s)"
         if missing:
@@ -269,4 +319,4 @@ class SearchTab(ctk.CTkFrame):
         if not path:
             return
         export_records_to_excel(self.multi_results, path)
-        messagebox.showinfo("Exported", f"Search results exported to:\n{path}")
+        notify(self, f"Search results exported to:\n{path}", kind="success")

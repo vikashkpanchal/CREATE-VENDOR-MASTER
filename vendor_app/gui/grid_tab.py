@@ -6,14 +6,16 @@ CTkEntry's extra per-widget draw overhead is not worth it at that count.
 """
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 
 import customtkinter as ctk
 
 from vendor_app.config import KEYS, LABELS, MAX_GRID_ROWS
+from vendor_app.importer import load_records_from_file
 from vendor_app.gui import theme
 from vendor_app.gui.scroll_canvas import ScrollCanvas
-from vendor_app.gui.widgets import card, danger_button, primary_button
+from vendor_app.gui.toast import notify
+from vendor_app.gui.widgets import card, danger_button, primary_button, secondary_button
 
 CELL_WIDTH = {
     "vendor_code": 14,
@@ -59,6 +61,9 @@ class GridTab(ctk.CTkFrame):
         actions = ctk.CTkFrame(bar, fg_color="transparent")
         actions.pack(side="right")
         danger_button(actions, "Clear Grid", self.clear_grid).pack(side="left", padx=(0, 8))
+        secondary_button(actions, "Import from File...", self.import_from_file, width=170).pack(
+            side="left", padx=(0, 8)
+        )
         primary_button(actions, "Save Grid to Master", self.save_grid, width=190).pack(side="left")
 
     def _build_grid(self):
@@ -194,9 +199,9 @@ class GridTab(ctk.CTkFrame):
             raw_records.append(record)
 
         result = self.store.bulk_upsert(raw_records)
-        message = f"Added: {result['added']}\nUpdated: {result['updated']}"
 
         if result["errors"]:
+            message = f"Added: {result['added']}  •  Updated: {result['updated']}"
             error_lines = "\n".join(f"Row {i}: {err}" for i, err in result["errors"][:15])
             more = len(result["errors"]) - 15
             if more > 0:
@@ -204,7 +209,45 @@ class GridTab(ctk.CTkFrame):
             message += f"\n\nRows with errors ({len(result['errors'])}) were skipped:\n{error_lines}"
             messagebox.showwarning("Grid Saved with Errors", message)
         else:
-            messagebox.showinfo("Grid Saved", message)
+            notify(self, f"Grid saved - Added: {result['added']}  •  Updated: {result['updated']}")
 
         if self.on_data_changed:
             self.on_data_changed()
+
+    def import_from_file(self):
+        path = filedialog.askopenfilename(
+            title="Import Vendors from File",
+            filetypes=[("Spreadsheet files", "*.xlsx *.xls *.csv *.tsv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            records = load_records_from_file(path)
+        except Exception as exc:
+            messagebox.showerror("Import Failed", f"Could not read that file:\n{exc}")
+            return
+
+        if not records:
+            messagebox.showwarning("No Rows Found", "That file has no recognizable vendor rows.")
+            return
+
+        truncated = len(records) > MAX_GRID_ROWS
+        records = records[:MAX_GRID_ROWS]
+
+        for row in self.entries:
+            for entry in row:
+                entry.delete(0, "end")
+
+        for r, record in enumerate(records):
+            for c, key in enumerate(KEYS):
+                value = record.get(key, "")
+                if value:
+                    self.entries[r][c].insert(0, value)
+
+        message = f"Loaded {len(records)} row(s) into the grid. Review, then click Save Grid to Master."
+        if truncated:
+            message += f"\n\nThe file had more than {MAX_GRID_ROWS} rows - only the first {MAX_GRID_ROWS} were loaded."
+            messagebox.showwarning("Import Truncated", message)
+        else:
+            notify(self, message, kind="info")
