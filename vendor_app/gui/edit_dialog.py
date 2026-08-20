@@ -17,8 +17,8 @@ from vendor_app.gui.widgets import card, divider, primary_button, secondary_butt
 
 SECTIONS = [
     ("VENDOR", ["vendor_code", "vendor_name", "vendor_email"]),
-    ("OWNER", ["vendor_owner_name", "vendor_owner_contact", "vendor_owner_email"]),
-    ("SUPERVISOR", ["vendor_supervisor_name", "vendor_supervisor_contact", "vendor_supervisor_email"]),
+    ("CONTACT PERSON 1", ["vendor_owner_name", "vendor_owner_contact", "vendor_owner_email"]),
+    ("CONTACT PERSON 2", ["vendor_supervisor_name", "vendor_supervisor_contact", "vendor_supervisor_email"]),
 ]
 
 
@@ -32,8 +32,18 @@ class EditVendorDialog(ctk.CTkToplevel):
 
         self.configure(fg_color=theme.BG_SURFACE)
         self.title("Add Vendor Record" if self.is_new else "Edit Vendor Record")
-        self.geometry("560x740")
-        self.minsize(480, 560)
+
+        # Fit the dialog to the screen rather than assuming 740px of height is
+        # available - on a laptop / scaled display a fixed-height dialog can
+        # extend past the bottom of the screen, taking the Save button with it.
+        screen_h = self.winfo_screenheight()
+        screen_w = self.winfo_screenwidth()
+        height = min(740, max(420, screen_h - 120))
+        width = min(560, max(420, screen_w - 80))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 3)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(420, 380)
         self.transient(master)
         self.grab_set()
 
@@ -64,6 +74,15 @@ class EditVendorDialog(ctk.CTkToplevel):
             wraplength=500, justify="left",
         ).pack(anchor="w", pady=(4, 0))
 
+        # Pack the action bar FIRST, anchored to the bottom edge. Tk gives
+        # space to earlier-packed widgets, so reserving it up front means the
+        # Save/Cancel buttons stay visible no matter how tall the form grows
+        # or how short the window gets; the scrollable body absorbs the rest.
+        buttons = ctk.CTkFrame(self, fg_color="transparent")
+        buttons.pack(fill="x", side="bottom", padx=20, pady=(0, 16))
+        primary_button(buttons, "Save", self.save, width=120).pack(side="right", padx=(8, 0))
+        secondary_button(buttons, "Cancel", self.destroy, width=120).pack(side="right")
+
         wrapper = ctk.CTkScrollableFrame(self, fg_color="transparent")
         wrapper.pack(fill="both", expand=True, padx=20, pady=10)
 
@@ -90,7 +109,9 @@ class EditVendorDialog(ctk.CTkToplevel):
                 entry.pack(side="left", fill="x", expand=True)
 
                 if key == "vendor_code" and not self.is_new:
-                    entry.configure(state="disabled")
+                    # readonly (not disabled): the primary key must never be
+                    # edited, but the user still needs to select and copy it.
+                    entry.configure(state="readonly", text_color=theme.TEXT_PRIMARY)
                 elif self._first_entry is None:
                     self._first_entry = entry
 
@@ -116,11 +137,6 @@ class EditVendorDialog(ctk.CTkToplevel):
                 ).pack(side="left")
 
             ctk.CTkFrame(box, fg_color="transparent", height=6).pack()
-
-        buttons = ctk.CTkFrame(self, fg_color="transparent")
-        buttons.pack(fill="x", padx=20, pady=(0, 20))
-        primary_button(buttons, "Save", self.save, width=120).pack(side="right", padx=(8, 0))
-        secondary_button(buttons, "Cancel", self.destroy, width=120).pack(side="right")
 
     def _focus_first_field(self):
         if self._first_entry is not None:

@@ -25,6 +25,9 @@ class MasterTab(ctk.CTkFrame):
         self.on_data_changed = on_data_changed
         self._sort_key = None
         self._sort_desc = False
+        self._stat_boxes = []
+        # Created before _build() because the clickable stat tiles bind to it.
+        self.status_filter = ctk.StringVar(value="All")
         self._build()
         self.refresh()
 
@@ -74,7 +77,6 @@ class MasterTab(ctk.CTkFrame):
         ctk.CTkLabel(toolbar, text="Status:", font=theme.small_font(), text_color=theme.TEXT_SECONDARY).pack(
             side="left", padx=(16, 8)
         )
-        self.status_filter = ctk.StringVar(value="All")
         ctk.CTkOptionMenu(
             toolbar,
             variable=self.status_filter,
@@ -115,20 +117,52 @@ class MasterTab(ctk.CTkFrame):
         strip = ctk.CTkFrame(self, fg_color="transparent")
         strip.pack(fill="x", padx=20, pady=(0, 14))
 
-        self.stat_total = self._stat_card(strip, "Total Vendors")
-        self.stat_active = self._stat_card(strip, "🟢 Active")
-        self.stat_inactive = self._stat_card(strip, "⚪ Inactive")
-        self.stat_blocked = self._stat_card(strip, "🔴 Blocked")
+        # Each tile is clickable and drives the Status filter below, so
+        # clicking e.g. "Blocked" lists exactly the blocked vendors in the
+        # table underneath (clicking "Total Vendors" clears the filter).
+        self.stat_total = self._stat_card(strip, "Total Vendors", "All")
+        self.stat_active = self._stat_card(strip, "🟢 Active", "Active")
+        self.stat_inactive = self._stat_card(strip, "⚪ Inactive", "Inactive")
+        self.stat_blocked = self._stat_card(strip, "🔴 Blocked", "Blocked")
 
-    def _stat_card(self, parent, title):
+    def _stat_card(self, parent, title, status_value):
         box = card(parent, fg_color=theme.BG_CARD)
         box.pack(side="left", fill="x", expand=True, padx=(0, 12))
-        ctk.CTkLabel(box, text=title, font=theme.small_font(), text_color=theme.TEXT_SECONDARY).pack(
-            anchor="w", padx=16, pady=(14, 0)
+        title_label = ctk.CTkLabel(
+            box, text=title, font=theme.small_font(), text_color=theme.TEXT_SECONDARY
         )
+        title_label.pack(anchor="w", padx=16, pady=(14, 0))
         value_label = ctk.CTkLabel(box, text="0", font=theme.display_font(), text_color=theme.TEXT_PRIMARY)
-        value_label.pack(anchor="w", padx=16, pady=(0, 14))
+        value_label.pack(anchor="w", padx=16, pady=(0, 4))
+        hint_label = ctk.CTkLabel(
+            box, text="click to filter", font=theme.font(10), text_color=theme.TEXT_MUTED
+        )
+        hint_label.pack(anchor="w", padx=16, pady=(0, 12))
+
+        # Bind the whole tile - the frame plus every label inside it, since a
+        # click landing on a child label never reaches the parent frame.
+        for widget in (box, title_label, value_label, hint_label):
+            widget.bind("<Button-1>", lambda e, sv=status_value: self._filter_by_status(sv))
+            widget.configure(cursor="hand2")
+
+        box._value_label = value_label
+        self._stat_boxes.append((box, status_value))
         return value_label
+
+    def _filter_by_status(self, status_value):
+        """Point the Status filter at `status_value` and refresh the table."""
+        self.status_filter.set(status_value)
+        self.refresh()
+
+    def _highlight_active_stat(self):
+        """Outline whichever stat tile matches the Status filter in force."""
+        current = self.status_filter.get()
+        for box, status_value in self._stat_boxes:
+            selected = status_value == current
+            box.configure(
+                border_color=theme.ACCENT if selected else theme.BORDER_SOFT,
+                border_width=2 if selected else 1,
+            )
 
     # ------------------------------------------------------------ sorting --
     def _on_sort(self, key):
@@ -190,6 +224,7 @@ class MasterTab(ctk.CTkFrame):
         self.stat_active.configure(text=str(counts["Active"]))
         self.stat_inactive.configure(text=str(counts["Inactive"]))
         self.stat_blocked.configure(text=str(counts["Blocked"]))
+        self._highlight_active_stat()
 
         self._update_toggle_label()
 

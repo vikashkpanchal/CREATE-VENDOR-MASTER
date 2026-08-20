@@ -1,16 +1,15 @@
-"""Excel export with dynamically expanded 'Vendor Email ID N' columns.
+"""Excel export of vendor records.
 
-The internal store keeps every vendor's emails as one semicolon-separated
-string. At export time we compute the widest email list across the given
-records and fan that single field out into "Vendor Email ID 1", "Vendor
-Email ID 2", ... columns so the spreadsheet always matches the exact
-required layout.
+Every vendor's emails stay exactly as entered - one semicolon-separated
+string in a single "Vendor Email ID" column. They are deliberately NOT
+split across "Vendor Email ID 1/2/3..." columns, so an exported sheet can
+be edited and re-imported without the address list changing shape.
 """
 
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from vendor_app.validators import split_emails
+from vendor_app.config import KEYS, LABELS
 
 HEADER_FILL = "1F6AA5"
 HEADER_FONT_COLOR = "FFFFFF"
@@ -18,37 +17,31 @@ SHEET_NAME = "Vendor Master"
 
 
 def build_export_dataframe(records: list) -> pd.DataFrame:
-    max_emails = 1
-    for record in records:
-        max_emails = max(max_emails, len(split_emails(record.get("vendor_email", ""))))
+    """One row per vendor, one column per field, in the mandated order.
 
-    columns = ["Sr. No.", "Vendor Code", "Vendor Name"]
-    columns += [f"Vendor Email ID {i + 1}" for i in range(max_emails)]
-    columns += [
-        "Vendor Owner Name",
-        "Vendor Owner Contact Number",
-        "Vendor Owner Email ID",
-        "Vendor Supervisor Contact Name",
-        "Vendor Supervisor Contact Number",
-        "Vendor Supervisor Email ID",
+    "Vendor Email ID" holds the vendor's full semicolon-separated address
+    list verbatim - no fanning out into numbered columns.
+    """
+    columns = [
+        "Sr. No.",
+        LABELS["vendor_code"],
+        LABELS["vendor_name"],
+        LABELS["vendor_email"],
+        LABELS["vendor_owner_name"],
+        LABELS["vendor_owner_contact"],
+        LABELS["vendor_owner_email"],
+        LABELS["vendor_supervisor_name"],
+        LABELS["vendor_supervisor_contact"],
+        LABELS["vendor_supervisor_email"],
+        "Status",
     ]
 
     rows = []
     for i, record in enumerate(records, start=1):
-        emails = split_emails(record.get("vendor_email", ""))
-        row = {
-            "Sr. No.": i,
-            "Vendor Code": record.get("vendor_code", ""),
-            "Vendor Name": record.get("vendor_name", ""),
-        }
-        for j in range(max_emails):
-            row[f"Vendor Email ID {j + 1}"] = emails[j] if j < len(emails) else ""
-        row["Vendor Owner Name"] = record.get("vendor_owner_name", "")
-        row["Vendor Owner Contact Number"] = record.get("vendor_owner_contact", "")
-        row["Vendor Owner Email ID"] = record.get("vendor_owner_email", "")
-        row["Vendor Supervisor Contact Name"] = record.get("vendor_supervisor_name", "")
-        row["Vendor Supervisor Contact Number"] = record.get("vendor_supervisor_contact", "")
-        row["Vendor Supervisor Email ID"] = record.get("vendor_supervisor_email", "")
+        row = {"Sr. No.": i}
+        for key in KEYS:
+            row[LABELS[key]] = record.get(key, "")
+        row["Status"] = record.get("status", "Active")
         rows.append(row)
 
     return pd.DataFrame(rows, columns=columns)
@@ -97,4 +90,23 @@ def export_audit_log_to_excel(entries: list, path: str) -> str:
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Audit Log")
         _style_worksheet(writer.sheets["Audit Log"], headers)
+    return path
+
+
+def export_equipment_to_excel(records: list, path: str) -> str:
+    """Write equipment master `records` to a formatted .xlsx at `path`."""
+    from vendor_app.config import EQUIPMENT_KEYS, EQUIPMENT_LABELS
+
+    columns = ["Sr. No."] + [EQUIPMENT_LABELS[k] for k in EQUIPMENT_KEYS]
+    rows = []
+    for i, record in enumerate(records, start=1):
+        row = {"Sr. No.": i}
+        for key in EQUIPMENT_KEYS:
+            row[EQUIPMENT_LABELS[key]] = record.get(key, "")
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=columns)
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Equipment Master")
+        _style_worksheet(writer.sheets["Equipment Master"], columns)
     return path

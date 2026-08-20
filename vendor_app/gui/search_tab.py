@@ -5,7 +5,7 @@ from tkinter import messagebox, filedialog
 
 import customtkinter as ctk
 
-from vendor_app.config import DISPLAY_COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS
+from vendor_app.config import DISPLAY_COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS, LABELS
 from vendor_app.export import export_records_to_excel
 from vendor_app.validators import split_emails, normalize
 from vendor_app.gui import theme
@@ -151,20 +151,20 @@ class SearchTab(ctk.CTkFrame):
         pill(badge_row, theme.format_status(status), fg=bg, tc=fg).pack(side="left", padx=(8, 0))
 
         self._info_section(self.card_frame, "Vendor", [
-            ("Vendor Code", record.get("vendor_code")),
-            ("Vendor Name", record.get("vendor_name")),
-        ] + self._email_rows("Vendor Email ID", record.get("vendor_email", "")))
+            (LABELS["vendor_code"], record.get("vendor_code")),
+            (LABELS["vendor_name"], record.get("vendor_name")),
+        ] + self._email_rows(LABELS["vendor_email"], record.get("vendor_email", "")))
 
-        self._info_section(self.card_frame, "Owner", [
-            ("Vendor Owner Name", record.get("vendor_owner_name")),
-            ("Vendor Owner Contact Number", record.get("vendor_owner_contact")),
-            ("Vendor Owner Email ID", record.get("vendor_owner_email")),
+        self._info_section(self.card_frame, "Contact Person 1", [
+            (LABELS["vendor_owner_name"], record.get("vendor_owner_name")),
+            (LABELS["vendor_owner_contact"], record.get("vendor_owner_contact")),
+            (LABELS["vendor_owner_email"], record.get("vendor_owner_email")),
         ])
 
-        self._info_section(self.card_frame, "Supervisor", [
-            ("Vendor Supervisor Contact Name", record.get("vendor_supervisor_name")),
-            ("Vendor Supervisor Contact Number", record.get("vendor_supervisor_contact")),
-            ("Vendor Supervisor Email ID", record.get("vendor_supervisor_email")),
+        self._info_section(self.card_frame, "Contact Person 2", [
+            (LABELS["vendor_supervisor_name"], record.get("vendor_supervisor_name")),
+            (LABELS["vendor_supervisor_contact"], record.get("vendor_supervisor_contact")),
+            (LABELS["vendor_supervisor_email"], record.get("vendor_supervisor_email")),
         ])
 
         actions = ctk.CTkFrame(self.card_frame, fg_color="transparent")

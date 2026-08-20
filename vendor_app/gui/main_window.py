@@ -1,19 +1,25 @@
-"""Top-level application window: branded header + 4-tab layout.
+"""Top-level application window: branded header + tabbed layout.
 
-Tab order is Search -> Master -> Import & Update Grid -> Audit Log,
-matching how the app is actually used day to day: look someone up first,
-browse the directory second, reach for bulk import when onboarding or
-refreshing many vendors at once, and check the audit trail when you need
-to know who changed what and when.
+Tab order follows day-to-day use: look a vendor up first, browse the
+directory second, reach for bulk import when onboarding many vendors,
+then the equipment master, the outgoing-email flows, and finally the
+audit trail when you need to know who changed what and when.
+
+Every tab after the first two is built lazily on first visit - each one
+carries tables or large text areas that most sessions never open.
 """
 
 import customtkinter as ctk
 
-from vendor_app.config import APP_TITLE, AUDIT_FILE
+from vendor_app.config import APP_TITLE, AUDIT_FILE, EQUIPMENT_FILE
 from vendor_app.audit import AuditLog
 from vendor_app.data_manager import VendorStore
+from vendor_app.equipment import EquipmentStore
+from vendor_app.settings import AppSettings
 from vendor_app.gui import theme
 from vendor_app.gui.audit_tab import AuditLogTab
+from vendor_app.gui.communication_tab import CommunicationTab
+from vendor_app.gui.equipment_tab import EquipmentTab
 from vendor_app.gui.grid_tab import GridTab
 from vendor_app.gui.search_tab import SearchTab
 from vendor_app.gui.master_tab import MasterTab
@@ -32,6 +38,8 @@ class MainWindow(ctk.CTk):
 
         self.audit_log = AuditLog(AUDIT_FILE)
         self.store = VendorStore(audit_log=self.audit_log)
+        self.equipment_store = EquipmentStore(EQUIPMENT_FILE)
+        self.settings = AppSettings()
 
         self._build_header()
 
@@ -55,6 +63,8 @@ class MainWindow(ctk.CTk):
         tab_search = self.tabview.add("Search Vendor Details")
         tab_master = self.tabview.add("Master Data Records")
         self._tab_grid = self.tabview.add("Import & Update Grid")
+        self._tab_equipment = self.tabview.add("Equipment Master")
+        self._tab_comm = self.tabview.add("Communication")
         tab_audit = self.tabview.add("Audit Log")
 
         self.search_tab = SearchTab(tab_search, self.store, on_data_changed=self.refresh_all)
@@ -67,10 +77,13 @@ class MainWindow(ctk.CTk):
         # Building it eagerly here would freeze the window before it even
         # appears, for a tab most sessions never open. Build it lazily on
         # first visit instead - see _on_tab_changed.
+        # Same lazy treatment for the Equipment Master and Communication
+        # tabs: both build tables and large text areas most sessions never touch.
         self.grid_tab = None
-        ctk.CTkLabel(
-            self._tab_grid, text="", fg_color="transparent"
-        ).pack()  # keeps the tab non-empty until first visit
+        self.equipment_tab = None
+        self.communication_tab = None
+        for placeholder_parent in (self._tab_grid, self._tab_equipment, self._tab_comm):
+            ctk.CTkLabel(placeholder_parent, text="", fg_color="transparent").pack()
 
         self.audit_tab = AuditLogTab(tab_audit, self.audit_log)
         self.audit_tab.pack(fill="both", expand=True)
@@ -80,11 +93,32 @@ class MainWindow(ctk.CTk):
         self.refresh_all()
 
     def _on_tab_changed(self):
-        if self.tabview.get() == "Import & Update Grid" and self.grid_tab is None:
-            for widget in self._tab_grid.winfo_children():
-                widget.destroy()
+        name = self.tabview.get()
+
+        if name == "Import & Update Grid" and self.grid_tab is None:
+            self._clear(self._tab_grid)
             self.grid_tab = GridTab(self._tab_grid, self.store, on_data_changed=self.refresh_all)
             self.grid_tab.pack(fill="both", expand=True)
+
+        elif name == "Equipment Master" and self.equipment_tab is None:
+            self._clear(self._tab_equipment)
+            self.equipment_tab = EquipmentTab(
+                self._tab_equipment, self.equipment_store, on_data_changed=self.refresh_all
+            )
+            self.equipment_tab.pack(fill="both", expand=True)
+
+        elif name == "Communication" and self.communication_tab is None:
+            self._clear(self._tab_comm)
+            self.communication_tab = CommunicationTab(
+                self._tab_comm, self.store, self.equipment_store, self.settings,
+                on_data_changed=self.refresh_all,
+            )
+            self.communication_tab.pack(fill="both", expand=True)
+
+    @staticmethod
+    def _clear(parent):
+        for widget in parent.winfo_children():
+            widget.destroy()
 
     def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=theme.BG_SURFACE, corner_radius=0, height=64)
@@ -123,5 +157,7 @@ class MainWindow(ctk.CTk):
         delete) to keep every tab in sync."""
         self.master_tab.refresh()
         self.audit_tab.refresh()
+        if self.equipment_tab is not None:
+            self.equipment_tab.refresh()
         active = sum(1 for r in self.store.all_records() if r.get("status") == "Active")
         self.record_badge.configure(text=f"  {active} Active Vendor{'s' if active != 1 else ''}  ")

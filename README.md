@@ -2,7 +2,8 @@
 
 A pure-Python desktop application for creating, importing, searching and
 maintaining a vendor master dataset, with SAP/Oracle-style vendor
-lifecycle management, a full audit trail, and clean Excel export.
+lifecycle management, a full audit trail, an equipment (rental/hire)
+master, Outlook email drafting, and clean Excel export.
 
 - **UI:** `customtkinter` (dark theme) with a consistent design system —
   branded header, cobalt accent, card layout, stat tiles, wrapped
@@ -31,13 +32,17 @@ Every vendor record uses this exact field order:
 | 1 | Sr. No. | Auto-generated (1, 2, 3, ...) — not stored, computed for display/export |
 | 2 | Vendor Code | **Required, unique, numeric** — primary key |
 | 3 | Vendor Name | No length limit |
-| 4 | Vendor Email ID | No length limit; multiple addresses separated by `;` (not `,`) — expands to "Vendor Email ID 1", "Vendor Email ID 2", ... on export |
-| 5 | Vendor Owner Name | Optional |
-| 6 | Vendor Owner Contact Number | Optional; digits only if provided |
-| 7 | Vendor Owner Email ID | Optional; single address |
-| 8 | Vendor Supervisor Contact Name | Optional |
-| 9 | Vendor Supervisor Contact Number | Optional; digits only if provided |
-| 10 | Vendor Supervisor Email ID | Optional; single address |
+| 4 | Vendor Email ID | No length limit; multiple addresses separated by `;` (not `,`) — exported as-is in one column |
+| 5 | Contact Person1 Name | Optional |
+| 6 | Contact Person1 Contact Number | Optional; digits only if provided |
+| 7 | Contact Person1 Email ID | Optional; single address |
+| 8 | Contact Person2 Name | Optional |
+| 9 | Contact Person2 Contact Number | Optional; digits only if provided |
+| 10 | Contact Person2 Email ID | Optional; single address |
+
+Sheets exported by older builds (which used "Vendor Owner ..." /
+"Vendor Supervisor ..." headers, and split emails across "Vendor Email ID
+1/2/3" columns) still import correctly.
 
 These 9 core fields (plus generated Sr. No.) are the exact, contractual
 layout for the bulk-entry grid and the `.xlsx` export — untouched by the
@@ -58,7 +63,7 @@ grid/export layout never changes:
 ## Validation rules
 
 - Vendor Code is mandatory and must be a number.
-- Owner/Supervisor contact numbers must contain digits only, when provided.
+- Contact Person1/Person2 numbers must contain digits only, when provided.
 - Multiple emails in "Vendor Email ID" must be separated by `;`. A `,` is rejected.
 - Every other field is optional — a blank cell never raises an error.
 - **Cell-level partial merge (upsert):** saving a record whose Vendor Code
@@ -70,12 +75,12 @@ grid/export layout never changes:
 
 Tab order matches day-to-day use: look someone up first, browse the
 directory second, reach for bulk import when onboarding or refreshing many
-vendors at once, and check the audit trail when you need to know who
-changed what.
+vendors at once, then the equipment master and the outgoing-email flows,
+and finally the audit trail when you need to know who changed what.
 
 ### 1. Search Vendor Details
 - **Single Vendor Search** — enter one Vendor Code to view a full profile
-  card (grouped into Vendor / Owner / Supervisor sections, with a status
+  card (grouped into Vendor / Contact Person 1 / Contact Person 2 sections, with a status
   pill), with buttons to edit it or toggle Active/Inactive on the spot.
 - **Multi Vendor Search** — paste/enter a list of Vendor Codes (one per
   line) to see all matches side-by-side in a sortable table, with an
@@ -83,7 +88,9 @@ changed what.
 
 ### 2. Master Data Records
 The full vendor directory, led by a stat strip (Total / Active / Inactive /
-Blocked), a live search bar, and a Status filter. Columns are sortable
+Blocked) — **click any tile to filter the table to those vendors**, e.g.
+click "Blocked" to list every blocked vendor — plus a live search bar and a
+Status filter. Status is shown as the last column. Columns are sortable
 (click a header to sort, click again to reverse). "+ Add Vendor" creates a
 new record; "Edit Selected" or a double-click edits one; "Deactivate
 Selected" toggles Active/Inactive; "Delete Permanently" removes a record
@@ -96,13 +103,62 @@ An Excel-like grid (100 rows max, for smooth, lag-free bulk entry) with
 wrapped, zebra-striped rows, scrolling in both directions. Paste directly
 from Excel with `Ctrl+V`; navigate cells with the arrow keys, `Tab`, and
 `Enter`. "Import from File..." loads vendor rows straight from an existing
-`.xlsx`/`.xls`/`.csv`/`.tsv` file into the grid (tolerant of header casing
-and of our own dynamic "Vendor Email ID N" export columns) for review
+`.xlsx`/`.xls`/`.csv`/`.tsv` file into the grid (tolerant of header casing,
+of legacy "Vendor Owner/Supervisor" headers and of older split
+"Vendor Email ID N" columns) for review
 before saving. "Save Grid to Master" validates every non-blank row and
 upserts it into the master dataset, reporting how many were added/updated
 and listing any row-level errors.
 
-### 4. Audit Log
+### 4. Equipment Master
+Equipment supplied by vendors on a rental/hire basis (not every vendor
+hires equipment out, so this is its own dataset). Columns: Sr No,
+Equipment Description, UOM, Capacity, RO/RH, Vendor Code, Vendor Name,
+RH/RO Number, Technical ID, Reg No, RH Date, Plant.
+
+- **Equipment Records** — the full list with live filter, sortable
+  columns, "+ Paste Rows", "Import from File...", export and delete.
+- **Single Search** — paste any ONE of RH/RO Number, Technical ID or
+  Reg No to pull up that machine's full profile.
+- **Multi Search** — paste a list of identifiers (any mix of the three)
+  to retrieve all matching records, capped at 50 results, with export.
+
+Technical ID must be numeric; RH/RO Number is alphanumeric. Rows are
+matched and merged on any shared identifier.
+
+### 5. Communication
+Drafts vendor emails from pasted data. **One email per vendor** — a vendor
+with five defective invoices or three broken machines receives a single
+email listing all of them. Nothing is sent: every message is saved as an
+Outlook **draft** in its own sub-folder for review.
+
+- **Defective Invoice Communication** — paste Vendor Code, Vendor Name, PO
+  Number, Scroll No, Invoice No, Invoice Date, Invoice Amount, Remarks (a
+  header row is detected and skipped). Drafts land in the Outlook folder
+  **"Defective Invoice"**.
+- **Equipment Breakdown Communication** — paste RH/RO Numbers or Technical
+  IDs; every other detail is fetched from the Equipment Master, since those
+  identifiers are unique. Drafts land in **"Equipment Breakdown"**.
+
+Recipient addresses come from the vendor master. If a vendor has no email
+on file, a dialog lists those vendors so you can either enter an address
+(saved straight back to the vendor master, and logged in the audit trail)
+or tick **Skip** to leave that vendor out of the run.
+
+The **CC address** applied to every outgoing email is asked for exactly
+once and then reused; change it any time via "Change CC" in the tab header.
+
+"Preview Selected" opens the exact email (subject, To, Cc and the full
+formatted body) in your browser before any draft is created. Email tables
+use a thick outer border, bold header row and content-fitted column widths,
+and the user's default Outlook signature is preserved beneath the body.
+
+**Outlook requirements:** Windows with Microsoft Outlook (tested against
+Office 16 / Outlook 2016) and the `pywin32` package. On any other platform
+the rest of the app works normally and the Communication tab says drafts
+are unavailable — "Preview Selected" still works everywhere.
+
+### 6. Audit Log
 A complete, append-only change history (`data/vendor_audit_log.csv`) —
 every add, field-level update, status change and delete, with a
 timestamp, a human-readable before/after summary, and who made the change.
@@ -121,12 +177,13 @@ be clicked to sort (ascending, then descending).
 
 ## Excel export layout
 
-The master/search `.xlsx` exports always follow the 10-field layout above,
-with "Vendor Email ID" dynamically expanded into "Vendor Email ID 1",
-"Vendor Email ID 2", etc. — as wide as the vendor with the most email
-addresses in that export. Headers are bold, wrapped, and the header row is
-frozen. The Audit Log export uses its own layout (timestamp, vendor,
-action, details, changed by).
+The master/search `.xlsx` exports follow the 10-field layout above plus a
+Status column. **Email addresses are exported exactly as entered** — the
+full semicolon-separated list stays in a single "Vendor Email ID" cell and
+is never split across numbered columns, so an exported sheet can be edited
+and re-imported without the address list changing shape. Headers are bold,
+wrapped, and the header row is frozen. The Audit Log and Equipment Master
+exports use their own layouts.
 
 ## Project layout
 
@@ -139,6 +196,11 @@ vendor_app/
   data_manager.py             VendorStore: load/save, upsert/merge, status,
                                delete, search - wired to the audit trail
   audit.py                    AuditLog: append-only change history
+  equipment.py                EquipmentStore: equipment master + lookups
+  communication.py            group pasted rows into one email per vendor
+  email_templates.py          email subjects/bodies + bordered HTML tables
+  outlook.py                  Outlook draft creation (Windows/pywin32)
+  settings.py                 persisted preferences (CC address)
   importer.py                 mass-import: parse vendor rows from a file
   export.py                   dynamic-column .xlsx export (vendors + audit log)
   gui/
@@ -151,7 +213,11 @@ vendor_app/
     search_tab.py                 Tab 1 — single/multi search
     master_tab.py                  Tab 2 — master directory + stat strip
     grid_tab.py                     Tab 3 — bulk entry grid + file import
-    audit_tab.py                     Tab 4 — audit trail
-    edit_dialog.py                    shared add/edit record + status dialog
-data/                         local CSV store + audit log (git-ignored)
+    equipment_tab.py                 Tab 4 — equipment master + searches
+    communication_tab.py              Tab 5 — the two email flows
+    audit_tab.py                       Tab 6 — audit trail
+    edit_dialog.py                      shared add/edit record + status dialog
+    missing_email_dialog.py              collect absent vendor emails
+    paste_dialog.py                       generic 'paste rows' dialog
+data/                         local CSV stores, audit log, settings (git-ignored)
 ```

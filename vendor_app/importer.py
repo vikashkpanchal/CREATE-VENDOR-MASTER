@@ -17,9 +17,12 @@ import re
 
 import pandas as pd
 
-from vendor_app.config import KEYS, LABELS
+from vendor_app.config import KEYS, LABELS, LEGACY_LABELS
 
+# Current headers plus the pre-rename Owner/Supervisor headers, so a sheet
+# exported by an older build still imports onto the right fields.
 _LABEL_TO_KEY = {label.lower(): key for key, label in LABELS.items()}
+_LABEL_TO_KEY.update({label.lower(): key for key, label in LEGACY_LABELS.items()})
 _EMAIL_COLUMN_RE = re.compile(r"^vendor email id\s*\d*$", re.IGNORECASE)
 
 

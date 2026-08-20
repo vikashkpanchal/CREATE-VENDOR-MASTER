@@ -1,3 +1,8 @@
 customtkinter>=5.2.0
 pandas>=2.0.0
 openpyxl>=3.1.0
+
+# Outlook draft creation (Communication tab). Windows only - the rest of the
+# app runs fine without it; the Communication tab reports that drafts are
+# unavailable rather than failing.
+pywin32>=306; sys_platform == "win32"
