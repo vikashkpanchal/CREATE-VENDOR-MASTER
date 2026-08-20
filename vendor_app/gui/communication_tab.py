@@ -33,6 +33,7 @@ from vendor_app.communication import (
 )
 from vendor_app import outlook
 from vendor_app.gui import theme
+from vendor_app.gui.cc_dialog import CCAddressDialog
 from vendor_app.gui.missing_email_dialog import MissingEmailDialog
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
@@ -236,17 +237,22 @@ class _EmailFlow(ctk.CTkFrame):
         if self.settings.cc_prompted:
             return True
 
-        dialog = ctk.CTkInputDialog(
-            text="Email address to keep in CC on every outgoing email.\n\n"
-                 "This is asked only once - you can change it later from the "
-                 "Communication tab header. Leave blank for no CC.",
-            title="Set CC Address",
-        )
-        value = dialog.get_input()
+        dialog = CCAddressDialog(self, self.settings, first_run=True)
+        value = dialog.wait_for_result()
         if value is None:
-            return False  # cancelled - do not mark as prompted, ask again next time
-        self.settings.set_cc_email(value)
+            # Cancelled: leave cc_prompted unset so we ask again next time
+            # rather than silently drafting with no CC.
+            return False
+        self._notify_cc_changed()
         return True
+
+    def _notify_cc_changed(self):
+        """Keep the header pill in step when the CC is set from inside a flow."""
+        host = self.master
+        while host is not None and not hasattr(host, "_refresh_cc_pill"):
+            host = getattr(host, "master", None)
+        if host is not None:
+            host._refresh_cc_pill()
 
     def create_drafts(self):
         if not self.messages:
@@ -387,6 +393,9 @@ class CommunicationTab(ctk.CTkFrame):
         cc_box.pack(side="right")
         self.cc_pill = pill(cc_box, "", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
         self.cc_pill.pack(side="left", padx=(0, 8))
+        # The pill is the thing users look at, so let them click it too.
+        self.cc_pill.configure(cursor="hand2")
+        self.cc_pill.bind("<Button-1>", lambda e: self.change_cc())
         secondary_button(cc_box, "Change CC", self.change_cc, width=120).pack(side="left")
         self._refresh_cc_pill()
 
@@ -426,14 +435,8 @@ class CommunicationTab(ctk.CTkFrame):
         self.cc_pill.configure(text=f"  CC: {cc or '(not set)'}  ")
 
     def change_cc(self):
-        dialog = ctk.CTkInputDialog(
-            text="Email address to keep in CC on every outgoing email.\n"
-                 "Leave blank for no CC.",
-            title="Set CC Address",
-        )
-        value = dialog.get_input()
-        if value is None:
-            return
-        self.settings.set_cc_email(value)
+        CCAddressDialog(self, self.settings, on_saved=self._on_cc_saved)
+
+    def _on_cc_saved(self, value):
         self._refresh_cc_pill()
-        notify(self, f"CC set to: {self.settings.cc_email or '(none)'}")
+        notify(self, f"CC set to: {value or '(none)'}")

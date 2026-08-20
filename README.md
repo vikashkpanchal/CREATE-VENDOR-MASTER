@@ -146,7 +146,11 @@ on file, a dialog lists those vendors so you can either enter an address
 or tick **Skip** to leave that vendor out of the run.
 
 The **CC address** applied to every outgoing email is asked for exactly
-once and then reused; change it any time via "Change CC" in the tab header.
+once and then reused. Change it any time via "Change CC" (or by clicking
+the CC pill) in the tab header: the dialog opens **pre-filled with the
+current address so you can edit it in place**, validates what you type
+before saving, and has a separate "Clear CC" for removing it entirely —
+Cancel always leaves the stored value untouched.
 
 "Preview Selected" opens the exact email (subject, To, Cc and the full
 formatted body) in your browser before any draft is created. Email tables
