@@ -34,6 +34,7 @@ from vendor_app.communication import (
 from vendor_app import outlook
 from vendor_app.gui import theme
 from vendor_app.gui.cc_dialog import CCAddressDialog
+from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.missing_email_dialog import MissingEmailDialog
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
@@ -75,7 +76,7 @@ class _EmailFlow(ctk.CTkFrame):
         split = ctk.CTkFrame(self, fg_color="transparent")
         split.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        left = card(split, fg_color=theme.BG_CARD, width=340)
+        left = card(split, fg_color=theme.BG_CARD, width=getattr(self, "INPUT_WIDTH", 340))
         left.pack(side="left", fill="y", padx=(0, 14))
         left.pack_propagate(False)
         section_label(left, self.INPUT_TITLE).pack(anchor="w", padx=16, pady=(16, 0))
@@ -83,19 +84,16 @@ class _EmailFlow(ctk.CTkFrame):
             left, text=self.INPUT_HINT, font=theme.small_font(),
             text_color=theme.TEXT_MUTED, justify="left", wraplength=300,
         ).pack(anchor="w", padx=16, pady=(0, 8))
-        # Buttons reserved at the bottom BEFORE the expanding textbox, so the
-        # textbox can never grow far enough to push them out of view.
-        secondary_button(left, "Clear", self.clear_input, width=308).pack(
+        # Buttons reserved at the bottom BEFORE the expanding input, so the
+        # input can never grow far enough to push them out of view.
+        button_width = getattr(self, "INPUT_WIDTH", 340) - 32
+        secondary_button(left, "Clear", self.clear_input, width=button_width).pack(
             side="bottom", padx=16, pady=(0, 16)
         )
-        primary_button(left, "Prepare Emails", self.prepare, width=308).pack(
+        primary_button(left, "Prepare Emails", self.prepare, width=button_width).pack(
             side="bottom", padx=16, pady=(10, 6)
         )
-        self.input_text = ctk.CTkTextbox(
-            left, width=300, height=300, fg_color=theme.BG_INPUT,
-            border_color=theme.BG_INPUT_BORDER, border_width=1, font=("Consolas", 10),
-        )
-        self.input_text.pack(fill="both", expand=True, padx=16, pady=4)
+        self.build_input(left)
 
         right = ctk.CTkFrame(split, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
@@ -126,6 +124,20 @@ class _EmailFlow(ctk.CTkFrame):
         outer.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         self.tree.bind("<Double-1>", lambda e: self.preview_selected())
 
+    def build_input(self, parent):
+        """Default input: a free-text paste box. Subclasses may replace it."""
+        self.input_text = ctk.CTkTextbox(
+            parent, width=300, height=300, fg_color=theme.BG_INPUT,
+            border_color=theme.BG_INPUT_BORDER, border_width=1, font=("Consolas", 10),
+        )
+        self.input_text.pack(fill="both", expand=True, padx=16, pady=4)
+
+    def read_input(self):
+        return self.input_text.get("1.0", "end")
+
+    def has_input(self):
+        return bool(self.read_input().strip())
+
     def clear_input(self):
         self.input_text.delete("1.0", "end")
         self.messages = []
@@ -138,13 +150,12 @@ class _EmailFlow(ctk.CTkFrame):
         raise NotImplementedError
 
     def prepare(self):
-        text = self.input_text.get("1.0", "end")
-        if not text.strip():
+        if not self.has_input():
             messagebox.showinfo("Nothing Pasted", "Paste some data first.")
             return
 
         try:
-            result = self._build_messages(text, self._skip_codes)
+            result = self._build_messages(self.read_input(), self._skip_codes)
         except Exception as exc:
             messagebox.showerror("Could Not Read Input", str(exc))
             return
@@ -168,7 +179,7 @@ class _EmailFlow(ctk.CTkFrame):
         if self.on_data_changed and outcome.get("saved"):
             self.on_data_changed()
         try:
-            result = self._build_messages(self.input_text.get("1.0", "end"), self._skip_codes)
+            result = self._build_messages(self.read_input(), self._skip_codes)
         except Exception as exc:
             messagebox.showerror("Could Not Read Input", str(exc))
             return
@@ -324,25 +335,54 @@ class DefectiveInvoiceFlow(_EmailFlow):
 
 
 class EquipmentBreakdownFlow(_EmailFlow):
-    INPUT_TITLE = "EQUIPMENT IDENTIFIERS"
+    INPUT_TITLE = "BREAKDOWN EQUIPMENT"
     INPUT_HINT = (
-        "Paste RH/RO Numbers or Technical IDs, one per line.\n\n"
-        "Every other detail (equipment, capacity, UOM, Reg No, vendor) is "
+        "Paste straight from Excel into the grid: the identifier in the first "
+        "column (RH/RO Number, Technical ID or Reg No) and that machine's "
+        "remark in the second.\n\n"
+        "Everything else - equipment, capacity, UOM, Reg No, vendor - is "
         "fetched from the Equipment Master, since these identifiers are unique."
     )
     FOLDER = OUTLOOK_BREAKDOWN_FOLDER
+    INPUT_WIDTH = 560
 
     def __init__(self, master, store, settings, equipment_store, on_data_changed=None):
         self.equipment_store = equipment_store
         super().__init__(master, store, settings, on_data_changed=on_data_changed)
 
-    def _build_messages(self, text, skip_codes):
-        identifiers = parse_identifiers(text)
-        if not identifiers:
-            messagebox.showwarning("No Identifiers Found", "No identifiers were recognized.")
+    def build_input(self, parent):
+        """A two-column grid, so remarks can be pasted alongside the IDs."""
+        self.grid = PasteGrid(
+            parent,
+            columns=[("identifier", "RH / Technical ID / Reg No"), ("remarks", "Remarks")],
+            widths=[22, 30],
+            rows=80,
+        )
+        self.grid.pack(fill="both", expand=True, padx=16, pady=4)
+
+    def read_input(self):
+        return self.grid.get_rows()
+
+    def has_input(self):
+        return bool(self.grid.get_rows())
+
+    def clear_input(self):
+        self.grid.clear()
+        self.messages = []
+        self._skip_codes = set()
+        self._render_preview()
+
+    def _build_messages(self, rows, skip_codes):
+        pairs = [(r.get("identifier", ""), r.get("remarks", "")) for r in rows
+                 if str(r.get("identifier", "")).strip()]
+        if not pairs:
+            messagebox.showwarning(
+                "No Identifiers Found",
+                "Enter at least one RH/RO Number, Technical ID or Reg No in the first column.",
+            )
             return None
 
-        resolved = resolve_breakdown_rows(self.equipment_store, identifiers)
+        resolved = resolve_breakdown_rows(self.equipment_store, pairs)
         if not resolved["records"]:
             messagebox.showwarning(
                 "Not Found",

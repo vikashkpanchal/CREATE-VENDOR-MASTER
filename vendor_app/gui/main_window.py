@@ -1,31 +1,34 @@
-"""Top-level application window: branded header + tabbed layout.
+"""Top-level application window: branded header + three top-level tabs.
 
-Tab order follows day-to-day use: look a vendor up first, browse the
-directory second, reach for bulk import when onboarding many vendors,
-then the equipment master, the outgoing-email flows, and finally the
-audit trail when you need to know who changed what and when.
+The whole application is three things, and the navigation now says so:
 
-Every tab after the first two is built lazily on first visit - each one
-carries tables or large text areas that most sessions never open.
+    Vendor Master     Records | Search | Change Log
+    Equipment Master  Records | Search | Dashboard | Change Log
+    Communication     Defective Invoice | Equipment Breakdown
+
+Everything else is a sub-tab inside one of those three, so the top bar
+never grows past what a person can scan in one glance. Each top tab (and
+each sub-tab inside it) is built lazily on first visit, so start-up stays
+fast no matter how much the app grows.
 """
 
 import customtkinter as ctk
 
-from vendor_app.config import APP_TITLE, AUDIT_FILE, EQUIPMENT_FILE
-from vendor_app.audit import AuditLog
+from vendor_app.audit import AuditLog, ChangeLog
+from vendor_app.config import (
+    APP_TITLE, AUDIT_FILE, EQUIPMENT_AUDIT_COLUMNS, EQUIPMENT_AUDIT_FILE, EQUIPMENT_FILE,
+)
 from vendor_app.data_manager import VendorStore
 from vendor_app.equipment import EquipmentStore
 from vendor_app.settings import AppSettings
 from vendor_app.gui import theme
-from vendor_app.gui.audit_tab import AuditLogTab
-from vendor_app.gui.communication_tab import CommunicationTab
-from vendor_app.gui.equipment_tab import EquipmentTab
-from vendor_app.gui.grid_tab import GridTab
-from vendor_app.gui.search_tab import SearchTab
-from vendor_app.gui.master_tab import MasterTab
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
+VENDOR_TAB = "Vendor Master"
+EQUIPMENT_TAB = "Equipment Master"
+COMMUNICATION_TAB = "Communication"
 
 
 class MainWindow(ctk.CTk):
@@ -33,12 +36,19 @@ class MainWindow(ctk.CTk):
         super().__init__()
         self.configure(fg_color=theme.BG_APP)
         self.title(APP_TITLE)
-        self.geometry("1440x860")
-        self.minsize(1150, 680)
+        self.geometry("1480x900")
+        self.minsize(1150, 700)
 
+        # --- stores -------------------------------------------------------
         self.audit_log = AuditLog(AUDIT_FILE)
         self.store = VendorStore(audit_log=self.audit_log)
-        self.equipment_store = EquipmentStore(EQUIPMENT_FILE)
+        self.equipment_log = ChangeLog(EQUIPMENT_AUDIT_FILE, EQUIPMENT_AUDIT_COLUMNS)
+        # The equipment store holds a reference to the vendor store so that a
+        # vendor referenced by an equipment row is created in the vendor
+        # master automatically (code + name).
+        self.equipment_store = EquipmentStore(
+            EQUIPMENT_FILE, change_log=self.equipment_log, vendor_store=self.store
+        )
         self.settings = AppSettings()
 
         self._build_header()
@@ -55,109 +65,104 @@ class MainWindow(ctk.CTk):
             corner_radius=10,
         )
         try:
-            self.tabview._segmented_button.configure(font=theme.font(13, "bold"), height=38)
+            self.tabview._segmented_button.configure(font=theme.font(14, "bold"), height=42)
         except Exception:
             pass  # private attribute name may change across customtkinter versions
         self.tabview.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
-        tab_search = self.tabview.add("Search Vendor Details")
-        tab_master = self.tabview.add("Master Data Records")
-        self._tab_grid = self.tabview.add("Import & Update Grid")
-        self._tab_equipment = self.tabview.add("Equipment Master")
-        self._tab_comm = self.tabview.add("Communication")
-        tab_audit = self.tabview.add("Audit Log")
-
-        self.search_tab = SearchTab(tab_search, self.store, on_data_changed=self.refresh_all)
-        self.search_tab.pack(fill="both", expand=True)
-
-        self.master_tab = MasterTab(tab_master, self.store, on_data_changed=self.refresh_all)
-        self.master_tab.pack(fill="both", expand=True)
-
-        # The bulk grid is ~1,000 widgets (100 rows x 9 editable cells).
-        # Building it eagerly here would freeze the window before it even
-        # appears, for a tab most sessions never open. Build it lazily on
-        # first visit instead - see _on_tab_changed.
-        # Same lazy treatment for the Equipment Master and Communication
-        # tabs: both build tables and large text areas most sessions never touch.
-        self.grid_tab = None
+        self._panes = {name: self.tabview.add(name)
+                       for name in (VENDOR_TAB, EQUIPMENT_TAB, COMMUNICATION_TAB)}
+        self.vendor_tab = None
         self.equipment_tab = None
         self.communication_tab = None
-        for placeholder_parent in (self._tab_grid, self._tab_equipment, self._tab_comm):
-            ctk.CTkLabel(placeholder_parent, text="", fg_color="transparent").pack()
-
-        self.audit_tab = AuditLogTab(tab_audit, self.audit_log)
-        self.audit_tab.pack(fill="both", expand=True)
 
         self.tabview.configure(command=self._on_tab_changed)
-        self.tabview.set("Search Vendor Details")
+        self.tabview.set(VENDOR_TAB)
+        self._ensure(VENDOR_TAB)
         self.refresh_all()
 
+    # --------------------------------------------------------- lazy tabs --
     def _on_tab_changed(self):
-        name = self.tabview.get()
+        self._ensure(self.tabview.get())
 
-        if name == "Import & Update Grid" and self.grid_tab is None:
-            self._clear(self._tab_grid)
-            self.grid_tab = GridTab(self._tab_grid, self.store, on_data_changed=self.refresh_all)
-            self.grid_tab.pack(fill="both", expand=True)
+    def _ensure(self, name):
+        if name == VENDOR_TAB and self.vendor_tab is None:
+            from vendor_app.gui.master_tabs import VendorMasterTab
+            self.vendor_tab = VendorMasterTab(
+                self._panes[name], self.store, self.audit_log,
+                on_data_changed=self.refresh_all,
+            )
+            self.vendor_tab.pack(fill="both", expand=True)
 
-        elif name == "Equipment Master" and self.equipment_tab is None:
-            self._clear(self._tab_equipment)
-            self.equipment_tab = EquipmentTab(
-                self._tab_equipment, self.equipment_store, on_data_changed=self.refresh_all
+        elif name == EQUIPMENT_TAB and self.equipment_tab is None:
+            from vendor_app.gui.master_tabs import EquipmentMasterTab
+            self.equipment_tab = EquipmentMasterTab(
+                self._panes[name], self.equipment_store, self.equipment_log,
+                on_data_changed=self.refresh_all,
             )
             self.equipment_tab.pack(fill="both", expand=True)
 
-        elif name == "Communication" and self.communication_tab is None:
-            self._clear(self._tab_comm)
+        elif name == COMMUNICATION_TAB and self.communication_tab is None:
+            from vendor_app.gui.communication_tab import CommunicationTab
             self.communication_tab = CommunicationTab(
-                self._tab_comm, self.store, self.equipment_store, self.settings,
+                self._panes[name], self.store, self.equipment_store, self.settings,
                 on_data_changed=self.refresh_all,
             )
             self.communication_tab.pack(fill="both", expand=True)
 
-    @staticmethod
-    def _clear(parent):
-        for widget in parent.winfo_children():
-            widget.destroy()
-
+    # ------------------------------------------------------------ header --
     def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=theme.BG_SURFACE, corner_radius=0, height=64)
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
 
-        accent_strip = ctk.CTkFrame(header, fg_color=theme.ACCENT, height=3, corner_radius=0)
-        accent_strip.pack(fill="x", side="bottom")
+        ctk.CTkFrame(header, fg_color=theme.ACCENT, height=3, corner_radius=0).pack(
+            fill="x", side="bottom"
+        )
 
         content = ctk.CTkFrame(header, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=24)
 
-        mark = ctk.CTkLabel(
+        ctk.CTkLabel(
             content, text="VM", width=36, height=36, corner_radius=8,
             fg_color=theme.ACCENT, text_color=theme.TEXT_ON_ACCENT, font=theme.font(13, "bold"),
-        )
-        mark.pack(side="left", pady=14)
+        ).pack(side="left", pady=14)
 
         title_col = ctk.CTkFrame(content, fg_color="transparent")
         title_col.pack(side="left", padx=(12, 0), pady=10)
         ctk.CTkLabel(
-            title_col, text="Vendor Master", font=theme.font(16, "bold"), text_color=theme.TEXT_PRIMARY
+            title_col, text="Vendor Master", font=theme.font(16, "bold"),
+            text_color=theme.TEXT_PRIMARY,
         ).pack(anchor="w")
         ctk.CTkLabel(
-            title_col, text="Vendor Management System", font=theme.small_font(), text_color=theme.TEXT_SECONDARY
+            title_col, text="Vendor & Equipment Management System",
+            font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w")
 
+        badges = ctk.CTkFrame(content, fg_color="transparent")
+        badges.pack(side="right", pady=17)
+        self.equipment_badge = ctk.CTkLabel(
+            badges, text="", font=theme.font(12, "bold"),
+            fg_color=theme.BG_CARD_ALT, text_color=theme.TEXT_SECONDARY,
+            corner_radius=999, height=30,
+        )
+        self.equipment_badge.pack(side="right", padx=(8, 0))
         self.record_badge = ctk.CTkLabel(
-            content, text="0 Active Vendors", font=theme.font(12, "bold"),
+            badges, text="", font=theme.font(12, "bold"),
             fg_color=theme.ACCENT_SOFT, text_color=theme.ACCENT, corner_radius=999, height=30,
         )
-        self.record_badge.pack(side="right", pady=17)
+        self.record_badge.pack(side="right")
 
+    # ----------------------------------------------------------- refresh --
     def refresh_all(self):
-        """Called after any write (grid save / edit dialog / status change /
-        delete) to keep every tab in sync."""
-        self.master_tab.refresh()
-        self.audit_tab.refresh()
-        if self.equipment_tab is not None:
-            self.equipment_tab.refresh()
+        """Keep every built view in step after any write, wherever it came from -
+        an equipment import can create vendors, so both masters can move at once."""
         active = sum(1 for r in self.store.all_records() if r.get("status") == "Active")
-        self.record_badge.configure(text=f"  {active} Active Vendor{'s' if active != 1 else ''}  ")
+        self.record_badge.configure(
+            text=f"  {active:,} Active Vendor{'s' if active != 1 else ''}  "
+        )
+        self.equipment_badge.configure(text=f"  {len(self.equipment_store):,} Equipment  ")
+
+        for tab in (self.vendor_tab, self.equipment_tab):
+            if tab is not None:
+                tab.refresh_built()

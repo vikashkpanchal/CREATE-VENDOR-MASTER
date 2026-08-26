@@ -132,14 +132,62 @@ def build_defective_invoice_messages(store, rows: list, skip_codes=None) -> dict
     return {"messages": messages, "unresolved": unresolved, "skipped": skipped}
 
 
-def resolve_breakdown_rows(equipment_store, identifiers: list) -> dict:
-    """Look up pasted RH/RO Numbers or Technical IDs in the equipment master.
+def resolve_breakdown_rows(equipment_store, identifiers: list, remarks=None) -> dict:
+    """Look up pasted RH/RO Numbers, Technical IDs or Reg Nos in the equipment
+    master, attaching each row's Remarks.
 
-    Returns {"records": [...], "missing": [...]} - every other field on the
-    email comes from the equipment master, since these identifiers are unique.
+    `identifiers` may be plain strings, or (identifier, remarks) pairs; a
+    parallel `remarks` list is also accepted. Every other field on the email
+    comes from the equipment master, since these identifiers are unique.
+
+    Returns {"records": [...], "missing": [...]}. The returned records are
+    COPIES - the caller's remarks must never be written into the stored
+    equipment master.
     """
-    found, missing = equipment_store.lookup_many(identifiers)
-    return {"records": found, "missing": missing}
+    pairs = []
+    for index, item in enumerate(identifiers):
+        if isinstance(item, (tuple, list)):
+            identifier = normalize(item[0])
+            note = normalize(item[1]) if len(item) > 1 else ""
+        else:
+            identifier = normalize(item)
+            note = normalize(remarks[index]) if remarks and index < len(remarks) else ""
+        if identifier:
+            pairs.append((identifier, note))
+
+    records, missing = [], []
+    seen_identifiers = set()
+    seen_machines = {}             # id(record) -> position in `records`
+
+    for identifier, note in pairs:
+        key = identifier.lower()
+        if key in seen_identifiers:
+            continue
+        seen_identifiers.add(key)
+
+        found = equipment_store.lookup(identifier)
+        if found is None:
+            missing.append(identifier)
+            continue
+
+        # The same machine can be referenced by its RH/RO Number, Technical ID
+        # AND Reg No - list it once, and keep the first remark given for it
+        # (appending any later, different remark rather than losing it).
+        machine = id(found)
+        if machine in seen_machines:
+            existing = records[seen_machines[machine]]
+            if note and note not in existing["remarks"]:
+                existing["remarks"] = (
+                    f"{existing['remarks']}; {note}" if existing["remarks"] else note
+                )
+            continue
+
+        row = dict(found)          # copy: never mutate the stored record
+        row["remarks"] = note
+        seen_machines[machine] = len(records)
+        records.append(row)
+
+    return {"records": records, "missing": missing}
 
 
 def build_breakdown_messages(store, equipment_records: list, skip_codes=None) -> dict:

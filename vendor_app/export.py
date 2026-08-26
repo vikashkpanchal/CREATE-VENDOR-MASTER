@@ -78,13 +78,16 @@ def export_records_to_excel(records: list, path: str) -> str:
     return path
 
 
-def export_audit_log_to_excel(entries: list, path: str) -> str:
-    """Write audit trail `entries` (most-recent-first dicts, see audit.py)
-    to a formatted .xlsx workbook at `path`. Returns path."""
+def export_audit_log_to_excel(entries: list, path: str, columns=None, headers=None) -> str:
+    """Write change-log `entries` (most-recent-first dicts, see audit.py) to a
+    formatted .xlsx workbook at `path`. `columns`/`headers` let the equipment
+    log export with its own column set. Returns path."""
     from vendor_app.config import AUDIT_COLUMNS, AUDIT_WRAPPED_LABELS
 
-    headers = [AUDIT_WRAPPED_LABELS.get(col, col).replace("\n", " ") for col in AUDIT_COLUMNS]
-    rows = [{headers[i]: entry.get(col, "") for i, col in enumerate(AUDIT_COLUMNS)} for entry in entries]
+    columns = list(columns or AUDIT_COLUMNS)
+    header_map = headers or AUDIT_WRAPPED_LABELS
+    headers = [header_map.get(col, col).replace("\n", " ") for col in columns]
+    rows = [{headers[i]: entry.get(col, "") for i, col in enumerate(columns)} for entry in entries]
     df = pd.DataFrame(rows, columns=headers)
 
     with pd.ExcelWriter(path, engine="openpyxl") as writer:

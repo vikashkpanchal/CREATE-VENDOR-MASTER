@@ -22,6 +22,15 @@ from vendor_app.config import (
 from vendor_app.validators import ValidationError, normalize
 
 
+def equipment_id(record: dict) -> str:
+    """The identifier a machine is known by in the change log - whichever of
+    the three unique identifiers it actually carries."""
+    for key in EQUIPMENT_LOOKUP_KEYS:
+        if record.get(key):
+            return record[key]
+    return ""
+
+
 def validate_equipment(raw: dict) -> dict:
     """Normalize a raw equipment row and enforce the few hard rules:
     at least one lookup identifier, and Technical ID numeric when present."""
@@ -45,12 +54,38 @@ def is_blank_equipment(raw: dict) -> bool:
 class EquipmentStore:
     """CRUD + multi-key lookup over the equipment master dataset."""
 
-    def __init__(self, path: str = EQUIPMENT_FILE):
+    def __init__(self, path: str = EQUIPMENT_FILE, change_log=None, vendor_store=None):
         self.path = path
+        self.change_log = change_log
+        # When set, any vendor referenced by an equipment row that is not yet
+        # in the vendor master is created there automatically (code + name).
+        self.vendor_store = vendor_store
         self._lock = threading.Lock()
         self._records = []           # list of cleaned dicts, display order
         self._index = {}             # (lookup_key, value.lower()) -> record
         self.load()
+
+    # --------------------------------------------------- vendor sync --
+    def _sync_vendor(self, record: dict):
+        """Ensure the row's vendor exists in the vendor master.
+
+        Returns a (code, name) tuple when a vendor was created, else None.
+        Only the code and name are seeded - contact details stay for the
+        user to fill in, and an existing vendor is never overwritten here.
+        """
+        if self.vendor_store is None:
+            return None
+        code = normalize(record.get("vendor_code", ""))
+        if not code or not code.isdigit():
+            return None
+        if self.vendor_store.get(code) is not None:
+            return None
+        name = normalize(record.get("vendor_name", ""))
+        try:
+            self.vendor_store.upsert({"vendor_code": code, "vendor_name": name})
+        except ValidationError:
+            return None
+        return (code, name)
 
     # ---------------------------------------------------------------- IO --
     def load(self):
@@ -97,54 +132,170 @@ class EquipmentStore:
         with self._lock:
             existing = self._find_existing(cleaned)
             if existing is not None:
+                changes = [
+                    f"{EQUIPMENT_LABELS[key]}: '{existing.get(key, '')}' -> '{cleaned[key]}'"
+                    for key in EQUIPMENT_KEYS
+                    if cleaned[key] and cleaned[key] != existing.get(key, "")
+                ]
                 for key in EQUIPMENT_KEYS:
                     if cleaned[key]:
                         existing[key] = cleaned[key]
-                result = "updated"
+                result, target = "updated", existing
+                details = "; ".join(changes) if changes else ""
             else:
                 self._records.append(cleaned)
-                result = "added"
+                result, target = "added", cleaned
+                details = "New equipment record created"
             self._reindex()
             self.save()
+            created_vendor = self._sync_vendor(target)
+
+        if self.change_log is not None and details:
+            self.change_log.record(
+                equipment_id(target), target.get("equipment_description", ""),
+                "Added" if result == "added" else "Updated", details,
+            )
+        if created_vendor:
+            self._log_vendor_autocreate(*created_vendor)
         return result
 
-    def bulk_upsert(self, raw_records: list) -> dict:
+    def _log_vendor_autocreate(self, code, name):
+        """Note the auto-created vendor in the EQUIPMENT log too, so the trail
+        explains where that new vendor came from (the vendor master's own log
+        already carries its 'Added' entry from the upsert)."""
+        if self.change_log is not None:
+            self.change_log.record(
+                code, name, "Vendor Added",
+                f"Vendor {code} auto-created in the vendor master from an equipment row",
+            )
+
+    def bulk_upsert(self, raw_records: list, progress=None) -> dict:
+        """Import any number of rows. There is no row cap.
+
+        The whole batch is applied in memory and written to disk ONCE at the
+        end (and the change log likewise), so a 20,000-row upload does not do
+        20,000 full-file rewrites. `progress(done, total)` is called
+        periodically so the caller can drive a loading dialog.
+        """
         added = updated = 0
         errors = []
+        log_entries = []
+        vendors_created = []
+        total = len(raw_records)
+
         with self._lock:
             for idx, raw in enumerate(raw_records, start=1):
-                if is_blank_equipment(raw):
-                    continue
-                try:
-                    cleaned = validate_equipment(raw)
-                except ValidationError as exc:
-                    errors.append((idx, str(exc)))
-                    continue
-                existing = self._find_existing(cleaned)
-                if existing is not None:
-                    for key in EQUIPMENT_KEYS:
-                        if cleaned[key]:
-                            existing[key] = cleaned[key]
-                    updated += 1
-                else:
-                    self._records.append(cleaned)
-                    added += 1
-                self._reindex()
+                if not is_blank_equipment(raw):
+                    try:
+                        cleaned = validate_equipment(raw)
+                    except ValidationError as exc:
+                        errors.append((idx, str(exc)))
+                        cleaned = None
+                    if cleaned is not None:
+                        existing = self._find_existing(cleaned)
+                        if existing is not None:
+                            changes = [
+                                f"{EQUIPMENT_LABELS[k]}: '{existing.get(k, '')}' -> '{cleaned[k]}'"
+                                for k in EQUIPMENT_KEYS
+                                if cleaned[k] and cleaned[k] != existing.get(k, "")
+                            ]
+                            for key in EQUIPMENT_KEYS:
+                                if cleaned[key]:
+                                    existing[key] = cleaned[key]
+                            updated += 1
+                            target = existing
+                            if changes:
+                                log_entries.append((
+                                    equipment_id(target),
+                                    target.get("equipment_description", ""),
+                                    "Updated", "; ".join(changes),
+                                ))
+                        else:
+                            self._records.append(cleaned)
+                            added += 1
+                            target = cleaned
+                            log_entries.append((
+                                equipment_id(target),
+                                target.get("equipment_description", ""),
+                                "Added", "New equipment record created",
+                            ))
+                        # Index incrementally: re-indexing the whole dataset
+                        # per row would make a large import quadratic.
+                        for lookup_key in EQUIPMENT_LOOKUP_KEYS:
+                            value = target.get(lookup_key, "")
+                            if value:
+                                self._index[(lookup_key, value.lower())] = target
+                        created = self._sync_vendor(target)
+                        if created:
+                            vendors_created.append(created)
+
+                if progress is not None and (idx % 200 == 0 or idx == total):
+                    progress(idx, total)
+
             if added or updated:
+                self._reindex()
                 self.save()
-        return {"added": added, "updated": updated, "errors": errors}
+
+        if self.change_log is not None:
+            for code, name in vendors_created:
+                log_entries.append((
+                    code, name, "Vendor Added",
+                    f"Vendor {code} auto-created in the vendor master from an equipment row",
+                ))
+            if log_entries:
+                self.change_log.record_many(log_entries)
+
+        return {
+            "added": added, "updated": updated, "errors": errors,
+            "vendors_created": len(vendors_created),
+        }
+
+    def update_field(self, record: dict, key: str, value) -> bool:
+        """Edit ONE cell in place (used by the editable grid). Returns True
+        when the value actually changed."""
+        if key not in EQUIPMENT_KEYS:
+            raise KeyError(key)
+        new_value = normalize(value)
+        old_value = record.get(key, "")
+        if new_value == old_value:
+            return False
+        if key in EQUIPMENT_NUMERIC_FIELDS and new_value and not new_value.isdigit():
+            raise ValidationError(EQUIPMENT_LABELS[key], "must be a number")
+
+        with self._lock:
+            record[key] = new_value
+            self._reindex()
+            self.save()
+            created_vendor = self._sync_vendor(record) if key in ("vendor_code", "vendor_name") else None
+
+        if self.change_log is not None:
+            self.change_log.record(
+                equipment_id(record), record.get("equipment_description", ""),
+                "Updated", f"{EQUIPMENT_LABELS[key]}: '{old_value}' -> '{new_value}'",
+            )
+        if created_vendor:
+            self._log_vendor_autocreate(*created_vendor)
+        return True
 
     def delete(self, record: dict) -> bool:
+        removed = None
         with self._lock:
             for i, existing in enumerate(self._records):
                 if existing is record or all(
                     existing.get(k) == record.get(k) for k in EQUIPMENT_KEYS
                 ):
-                    del self._records[i]
+                    removed = self._records.pop(i)
                     self._reindex()
                     self.save()
-                    return True
-        return False
+                    break
+        if removed is None:
+            return False
+        if self.change_log is not None:
+            self.change_log.record(
+                equipment_id(removed), removed.get("equipment_description", ""),
+                "Deleted", "Equipment record permanently deleted",
+            )
+        return True
 
     def clear(self):
         with self._lock:

@@ -26,13 +26,9 @@ from vendor_app.export import export_equipment_to_excel
 from vendor_app.importer import _read_table, _normalize_header  # reuse tolerant file reading
 from vendor_app.validators import normalize
 from vendor_app.gui import theme
-from vendor_app.gui.paste_dialog import PasteRowsDialog
-from vendor_app.gui.style import build_table, insert_row, set_heading_text
+from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
-from vendor_app.gui.util import debounce
-from vendor_app.gui.widgets import (
-    card, danger_button, divider, pill, primary_button, secondary_button, section_label,
-)
+from vendor_app.gui.widgets import card, divider, pill, primary_button, section_label
 
 COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 _EQUIPMENT_LABEL_TO_KEY = {label.lower(): key for key, label in EQUIPMENT_LABELS.items()}
@@ -55,24 +51,26 @@ def load_equipment_from_file(path: str) -> list:
     ]
 
 
-class EquipmentTab(ctk.CTkFrame):
+class EquipmentSearchScreen(ctk.CTkFrame):
+    """Look one machine up, or resolve a whole list of identifiers at once."""
+
     def __init__(self, master, equipment_store, on_data_changed=None):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.store = equipment_store
         self.on_data_changed = on_data_changed
-        self._sort_key = None
-        self._sort_desc = False
         self.multi_results = []
 
         self._build_header()
-        self.records_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.single_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.multi_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._build_records()
         self._build_single()
         self._build_multi()
-        self.records_frame.pack(fill="both", expand=True)
-        self.refresh()
+        self.single_frame.pack(fill="both", expand=True)
+
+    def refresh(self):
+        """Re-run the last multi search so results follow the master."""
+        if self.multi_results:
+            self.do_multi_search()
 
     # -------------------------------------------------------------- header --
     def _build_header(self):
@@ -82,18 +80,18 @@ class EquipmentTab(ctk.CTkFrame):
         left = ctk.CTkFrame(bar, fg_color="transparent")
         left.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
-            left, text="Equipment Master", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
+            left, text="Search Equipment", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
         ctk.CTkLabel(
             left,
-            text="Equipment supplied by vendors on a rental/hire basis. Search by "
-                 "RH/RO Number, Technical ID or Reg No.",
+            text="Find a machine by RH/RO Number, Technical ID or Reg No - "
+                 "any one of the three works.",
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
         seg = ctk.CTkSegmentedButton(
             bar,
-            values=["Equipment Records", "Single Search", "Multi Search"],
+            values=["Single Search", "Multi Search"],
             command=self._on_mode_change,
             selected_color=theme.ACCENT,
             selected_hover_color=theme.ACCENT_HOVER,
@@ -103,173 +101,16 @@ class EquipmentTab(ctk.CTkFrame):
             font=theme.font(12, "bold"),
             height=36,
         )
-        seg.set("Equipment Records")
+        seg.set("Single Search")
         seg.pack(side="right")
 
     def _on_mode_change(self, value):
-        for frame in (self.records_frame, self.single_frame, self.multi_frame):
+        for frame in (self.single_frame, self.multi_frame):
             frame.pack_forget()
-        if value == "Equipment Records":
-            self.records_frame.pack(fill="both", expand=True)
-        elif value == "Single Search":
+        if value == "Single Search":
             self.single_frame.pack(fill="both", expand=True)
         else:
             self.multi_frame.pack(fill="both", expand=True)
-
-    # ------------------------------------------------------------- records --
-    def _build_records(self):
-        toolbar = ctk.CTkFrame(self.records_frame, fg_color="transparent")
-        toolbar.pack(fill="x", padx=20, pady=(0, 10))
-
-        ctk.CTkLabel(
-            toolbar, text="Search:", font=theme.small_font(), text_color=theme.TEXT_SECONDARY
-        ).pack(side="left", padx=(0, 8))
-        self.search_var = ctk.StringVar()
-        self.search_var.trace_add(
-            "write", lambda *a: debounce(self, "_search_after_id", 200, self.refresh)
-        )
-        ctk.CTkEntry(
-            toolbar, textvariable=self.search_var, width=320, height=32,
-            placeholder_text="Filter by description, vendor, plant, identifier...",
-            fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
-        ).pack(side="left")
-
-        self.count_pill = pill(toolbar, "0 records")
-        self.count_pill.pack(side="left", padx=12)
-
-        actions = ctk.CTkFrame(toolbar, fg_color="transparent")
-        actions.pack(side="right")
-        danger_button(actions, "Delete Selected", self.delete_selected, width=150).pack(
-            side="left", padx=(8, 0)
-        )
-        primary_button(actions, "Export (.xlsx)", self.export_all, width=150).pack(side="left", padx=(8, 0))
-        secondary_button(actions, "Import from File...", self.import_from_file, width=170).pack(
-            side="left", padx=(8, 0)
-        )
-        primary_button(actions, "+ Paste Rows", self.paste_rows, width=140).pack(side="left")
-
-        wrap = card(self.records_frame, fg_color=theme.BG_CARD)
-        wrap.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        wrap.grid_rowconfigure(0, weight=1)
-        wrap.grid_columnconfigure(0, weight=1)
-        outer, self.tree = build_table(
-            wrap, COLUMNS, EQUIPMENT_WRAPPED_LABELS, EQUIPMENT_COLUMN_WIDTHS, on_sort=self._on_sort
-        )
-        outer.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-
-    def _on_sort(self, key):
-        if key == "sr_no":
-            return
-        if self._sort_key == key:
-            self._sort_desc = not self._sort_desc
-        else:
-            self._sort_key, self._sort_desc = key, False
-        self.refresh()
-
-    def refresh(self):
-        query = self.search_var.get() if hasattr(self, "search_var") else ""
-        records = self.store.search(query)
-        if self._sort_key:
-            records = sorted(
-                records, key=lambda r: str(r.get(self._sort_key, "")).lower(), reverse=self._sort_desc
-            )
-
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-        self._row_records = {}
-        for i, record in enumerate(records, start=1):
-            iid = insert_row(
-                self.tree, i - 1, values=[i] + [record.get(k, "") for k in EQUIPMENT_KEYS]
-            )
-            self._row_records[iid] = record
-        set_heading_text(self.tree, COLUMNS, EQUIPMENT_WRAPPED_LABELS, self._sort_key, self._sort_desc)
-        self.count_pill.configure(
-            text=f"  {len(records)} record{'s' if len(records) != 1 else ''}  "
-        )
-
-    # ------------------------------------------------------------- actions --
-    def paste_rows(self):
-        PasteRowsDialog(
-            self,
-            "Paste Equipment Rows",
-            EQUIPMENT_KEYS,
-            EQUIPMENT_LABELS,
-            self._apply_rows,
-            note="Paste equipment rows copied from Excel (one machine per line). "
-                 "Each row needs at least one of RH/RO Number, Technical ID or Reg No.",
-        )
-
-    def _apply_rows(self, rows):
-        if not rows:
-            return
-        result = self.store.bulk_upsert(rows)
-        self._report(result)
-
-    def import_from_file(self):
-        path = filedialog.askopenfilename(
-            title="Import Equipment from File",
-            filetypes=[("Spreadsheet files", "*.xlsx *.xls *.csv *.tsv"), ("All files", "*.*")],
-        )
-        if not path:
-            return
-        try:
-            rows = load_equipment_from_file(path)
-        except Exception as exc:
-            messagebox.showerror("Import Failed", f"Could not read that file:\n{exc}")
-            return
-        if not rows:
-            messagebox.showwarning("No Rows Found", "That file has no recognizable equipment rows.")
-            return
-        self._report(self.store.bulk_upsert(rows))
-
-    def _report(self, result):
-        if result["errors"]:
-            lines = "\n".join(f"Row {i}: {err}" for i, err in result["errors"][:15])
-            more = len(result["errors"]) - 15
-            if more > 0:
-                lines += f"\n...and {more} more"
-            messagebox.showwarning(
-                "Saved with Errors",
-                f"Added: {result['added']}  •  Updated: {result['updated']}\n\n"
-                f"Rows skipped ({len(result['errors'])}):\n{lines}",
-            )
-        else:
-            notify(self, f"Added: {result['added']}  •  Updated: {result['updated']}")
-        self.refresh()
-        if self.on_data_changed:
-            self.on_data_changed()
-
-    def delete_selected(self):
-        selection = self.tree.selection()
-        if not selection:
-            messagebox.showinfo("Select a Row", "Select an equipment row first.")
-            return
-        record = self._row_records.get(selection[0])
-        if not record:
-            return
-        label = record.get("equipment_description") or record.get("rh_ro_number") or "this record"
-        if not messagebox.askyesno("Delete Equipment", f"Permanently delete '{label}'?"):
-            return
-        self.store.delete(record)
-        notify(self, "Equipment record deleted.", kind="error")
-        self.refresh()
-        if self.on_data_changed:
-            self.on_data_changed()
-
-    def export_all(self):
-        records = self.store.all_records()
-        if not records:
-            messagebox.showwarning("No Data", "There is no equipment to export.")
-            return
-        default = f"Equipment_Master_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx", initialfile=default,
-            filetypes=[("Excel Workbook", "*.xlsx")],
-        )
-        if not path:
-            return
-        export_equipment_to_excel(records, path)
-        notify(self, f"Equipment exported to:\n{path}")
 
     # -------------------------------------------------------- single search --
     def _build_single(self):

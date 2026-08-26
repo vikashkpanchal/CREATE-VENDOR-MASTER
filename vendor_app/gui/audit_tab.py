@@ -19,13 +19,26 @@ from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
 from vendor_app.gui.widgets import card, primary_button, pill
 
-ACTION_FILTERS = ["All Actions", "Added", "Updated", "Status Change", "Deleted"]
+ACTION_FILTERS = ["All Actions", "Added", "Updated", "Status Change", "Deleted", "Vendor Added"]
 
 
 class AuditLogTab(ctk.CTkFrame):
-    def __init__(self, master, audit_log):
+    """Change history for one master. The columns are supplied by the caller
+    so the same screen serves both the vendor and equipment logs."""
+
+    def __init__(self, master, audit_log, columns=None, headers=None, widths=None,
+                 title="Change Log", subtitle=None):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.audit_log = audit_log
+        self.columns = list(columns or AUDIT_COLUMNS)
+        self.headers = headers or AUDIT_WRAPPED_LABELS
+        self.widths = widths or AUDIT_COLUMN_WIDTHS
+        self.title_text = title
+        self.subtitle_text = subtitle or (
+            "A complete, append-only history - every add, update, status change and delete."
+        )
+        self._key_col = self.columns[1]
+        self._name_col = self.columns[2]
         self._build()
         self.refresh()
 
@@ -36,13 +49,11 @@ class AuditLogTab(ctk.CTkFrame):
         left = ctk.CTkFrame(header, fg_color="transparent")
         left.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
-            left, text="Audit Log", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
+            left, text=self.title_text, font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
         ctk.CTkLabel(
-            left,
-            text="A complete, append-only change history - every add, update, status change and delete.",
-            font=theme.small_font(),
-            text_color=theme.TEXT_SECONDARY,
+            left, text=self.subtitle_text,
+            font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
         primary_button(header, "Export Audit Log (.xlsx)", self.export_log, width=200).pack(side="right")
@@ -59,7 +70,7 @@ class AuditLogTab(ctk.CTkFrame):
         ctk.CTkEntry(
             toolbar,
             textvariable=self.search_var,
-            placeholder_text="Search by Vendor Name or Vendor Code...",
+            placeholder_text="Search this log...",
             width=300,
             height=32,
             fg_color=theme.BG_INPUT,
@@ -91,7 +102,7 @@ class AuditLogTab(ctk.CTkFrame):
         table_wrap.grid_rowconfigure(0, weight=1)
         table_wrap.grid_columnconfigure(0, weight=1)
 
-        outer, self.tree = build_table(table_wrap, AUDIT_COLUMNS, AUDIT_WRAPPED_LABELS, AUDIT_COLUMN_WIDTHS)
+        outer, self.tree = build_table(table_wrap, self.columns, self.headers, self.widths)
         outer.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
 
     def _filtered_entries(self):
@@ -103,7 +114,9 @@ class AuditLogTab(ctk.CTkFrame):
         if q:
             entries = [
                 e for e in entries
-                if q in e.get("vendor_code", "").lower() or q in e.get("vendor_name", "").lower()
+                if q in str(e.get(self._key_col, "")).lower()
+                or q in str(e.get(self._name_col, "")).lower()
+                or q in str(e.get("details", "")).lower()
             ]
         return entries
 
@@ -112,7 +125,7 @@ class AuditLogTab(ctk.CTkFrame):
         for row in self.tree.get_children():
             self.tree.delete(row)
         for i, entry in enumerate(entries):
-            insert_row(self.tree, i, values=[entry.get(col, "") for col in AUDIT_COLUMNS])
+            insert_row(self.tree, i, values=[entry.get(col, "") for col in self.columns])
         self.count_pill.configure(text=f"  {len(entries)} entr{'y' if len(entries) == 1 else 'ies'}  ")
 
     def export_log(self):
@@ -126,5 +139,5 @@ class AuditLogTab(ctk.CTkFrame):
         )
         if not path:
             return
-        export_audit_log_to_excel(entries, path)
+        export_audit_log_to_excel(entries, path, columns=self.columns, headers=self.headers)
         notify(self, f"Audit log exported to:\n{path}", kind="success")

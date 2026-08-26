@@ -71,103 +71,109 @@ grid/export layout never changes:
   cells leave the previously stored value untouched. This applies to grid
   saves and to the edit dialog alike.
 
-## Tabs
+## Navigation
 
-Tab order matches day-to-day use: look someone up first, browse the
-directory second, reach for bulk import when onboarding or refreshing many
-vendors at once, then the equipment master and the outgoing-email flows,
-and finally the audit trail when you need to know who changed what.
+The application is three things, and the top bar says exactly that. Everything
+else is a sub-tab inside one of them, so the top level never grows past what
+you can scan in a glance:
 
-### 1. Search Vendor Details
-- **Single Vendor Search** — enter one Vendor Code to view a full profile
-  card (grouped into Vendor / Contact Person 1 / Contact Person 2 sections, with a status
-  pill), with buttons to edit it or toggle Active/Inactive on the spot.
-- **Multi Vendor Search** — paste/enter a list of Vendor Codes (one per
-  line) to see all matches side-by-side in a sortable table, with an
-  "Export Search Results (.xlsx)" button.
+| Tab | Sub-tabs |
+|-----|----------|
+| **Vendor Master** | Records · Search · Change Log |
+| **Equipment Master** | Records · Search · Dashboard · Change Log |
+| **Communication** | Defective Invoice · Equipment Breakdown |
 
-### 2. Master Data Records
-The full vendor directory, led by a stat strip (Total / Active / Inactive /
-Blocked) — **click any tile to filter the table to those vendors**, e.g.
-click "Blocked" to list every blocked vendor — plus a live search bar and a
-Status filter. Status is shown as the last column. Columns are sortable
-(click a header to sort, click again to reverse). "+ Add Vendor" creates a
-new record; "Edit Selected" or a double-click edits one; "Deactivate
-Selected" toggles Active/Inactive; "Delete Permanently" removes a record
-outright (confirmed, and logged to the audit trail — prefer Deactivate for
-anything reversible). "Export All (.xlsx)" writes every record to a
-formatted spreadsheet.
+Every tab and sub-tab is built on first visit, so start-up stays fast.
 
-### 3. Import & Update Grid
-An Excel-like grid (100 rows max, for smooth, lag-free bulk entry) with
-wrapped, zebra-striped rows, scrolling in both directions. Paste directly
-from Excel with `Ctrl+V`; navigate cells with the arrow keys, `Tab`, and
-`Enter`. "Import from File..." loads vendor rows straight from an existing
-`.xlsx`/`.xls`/`.csv`/`.tsv` file into the grid (tolerant of header casing,
-of legacy "Vendor Owner/Supervisor" headers and of older split
-"Vendor Email ID N" columns) for review
-before saving. "Save Grid to Master" validates every non-blank row and
-upserts it into the master dataset, reporting how many were added/updated
-and listing any row-level errors.
+## Working with master data
 
-### 4. Equipment Master
-Equipment supplied by vendors on a rental/hire basis (not every vendor
-hires equipment out, so this is its own dataset). Columns: Sr No,
-Equipment Description, UOM, Capacity, RO/RH, Vendor Code, Vendor Name,
-RH/RO Number, Technical ID, Reg No, RH Date, Plant.
+Both masters share the same screen design, and both behave the same way.
 
-- **Equipment Records** — the full list with live filter, sortable
-  columns, "+ Paste Rows", "Import from File...", export and delete.
-- **Single Search** — paste any ONE of RH/RO Number, Technical ID or
-  Reg No to pull up that machine's full profile.
-- **Multi Search** — paste a list of identifiers (any mix of the three)
-  to retrieve all matching records, capped at 50 results, with export.
+- **Directly editable.** Double-click any cell to edit it in place. `Enter`
+  commits, `Esc` cancels, `Tab` commits and moves to the next field. Every
+  commit goes through the store, so the same validation applies as anywhere
+  else and a rejected value is restored with the reason shown.
+- **Copy out to Excel.** `Ctrl+C` copies the highlighted cell, or the whole
+  selected block of rows as TSV, so it pastes into Excel as real cells.
+  Right-click for Copy cell / Copy row(s) / Copy row(s) with headers.
+- **Unlimited import.** "Import..." reads an `.xlsx`/`.xls`/`.csv`/`.tsv` of
+  any size, and "Paste Rows" takes any number of pasted rows. There is no row
+  cap. Long imports run on a background thread behind a progress dialog that
+  shows live row counts - the window keeps painting instead of going blank.
+- **Full change log.** Each master keeps its own append-only log
+  (`data/vendor_audit_log.csv`, `data/equipment_audit_log.csv`) recording every
+  add, field-level edit and delete with a before/after diff, a timestamp and
+  who made it. Each is filterable and exports to `.xlsx` on its own.
+- **Dialogs always fit.** Every dialog sizes itself to the actual screen and
+  reserves its buttons before its body, so Save can never end up off-screen.
 
-Technical ID must be numeric; RH/RO Number is alphanumeric. Rows are
-matched and merged on any shared identifier.
+### Vendors created automatically from equipment
 
-### 5. Communication
-Drafts vendor emails from pasted data. **One email per vendor** — a vendor
-with five defective invoices or three broken machines receives a single
-email listing all of them. Nothing is sent: every message is saved as an
-Outlook **draft** in its own sub-folder for review.
+Any vendor referenced by an equipment row that is not already in the vendor
+master is created there automatically with its code and name - on single
+edits and on bulk imports alike. The vendor master's log records the new
+vendor; the equipment log records why it appeared. Contact details are left
+blank for you to fill in (the Communication tab will prompt for a missing
+email when it needs one).
 
-- **Defective Invoice Communication** — paste Vendor Code, Vendor Name, PO
-  Number, Scroll No, Invoice No, Invoice Date, Invoice Amount, Remarks (a
-  header row is detected and skipped). Drafts land in the Outlook folder
-  **"Defective Invoice"**.
-- **Equipment Breakdown Communication** — paste RH/RO Numbers or Technical
-  IDs; every other detail is fetched from the Equipment Master, since those
-  identifiers are unique. Drafts land in **"Equipment Breakdown"**.
+## Equipment Master
 
-Recipient addresses come from the vendor master. If a vendor has no email
-on file, a dialog lists those vendors so you can either enter an address
-(saved straight back to the vendor master, and logged in the audit trail)
-or tick **Skip** to leave that vendor out of the run.
+Alongside the identification columns (Equipment Description, UOM, Capacity,
+RO/RH, Vendor Code, Vendor Name, RH/RO Number, Technical ID, Reg No, RH Date,
+Plant) each machine carries its commercial terms: **Plant Code, Validity End
+Date, ARC No, FO No, MCM/Shift Code, Disc (MCM/Shift), MCM/Shift Rate, OT
+Code, DIC (OT), OT Rate**.
 
-The **CC address** applied to every outgoing email is asked for exactly
-once and then reused. Change it any time via "Change CC" (or by clicking
-the CC pill) in the tab header: the dialog opens **pre-filled with the
-current address so you can edit it in place**, validates what you type
-before saving, and has a separate "Clear CC" for removing it entirely —
-Cancel always leaves the stored value untouched.
+Any one of RH/RO Number, Technical ID or Reg No identifies a machine, so
+search and import both work from whichever you have; rows are matched and
+merged on any shared identifier. Technical ID must be numeric.
 
-"Preview Selected" opens the exact email (subject, To, Cc and the full
-formatted body) in your browser before any draft is created. Email tables
-use a thick outer border, bold header row and content-fitted column widths,
-and the user's default Outlook signature is preserved beneath the body.
+### Dashboard
 
-**Outlook requirements:** Windows with Microsoft Outlook (tested against
-Office 16 / Outlook 2016) and the `pywin32` package. On any other platform
-the rest of the app works normally and the Communication tab says drafts
-are unavailable — "Preview Selected" still works everywhere.
+An interactive analytics view over the whole fleet. Filter by **vendor,
+equipment, capacity, RO/RH and plant**, or search any field - every KPI,
+chart and the results table recompute from the same filtered set, so the
+screen always agrees with itself.
 
-### 6. Audit Log
-A complete, append-only change history (`data/vendor_audit_log.csv`) —
-every add, field-level update, status change and delete, with a
-timestamp, a human-readable before/after summary, and who made the change.
-Filterable by vendor name/code and by action type, with its own
-"Export Audit Log (.xlsx)" button.
+- KPI tiles: equipment shown, distinct suppliers, equipment types, plants,
+  and contracts whose validity ends within 30 days
+- **Top 10 suppliers** and **top 10 equipment types** by count, as ranked
+  bars with hover detail
+- **RO vs RH** composition, and top capacities
+- "Export Filtered (.xlsx)" writes exactly what the filters currently select
+
+## Communication
+
+Drafts vendor emails from pasted data. **One email per vendor** - a vendor
+with five defective invoices or three broken machines receives a single email
+listing all of them. Nothing is sent: every message is saved as an Outlook
+**draft** in its own sub-folder for review.
+
+- **Defective Invoice** - paste Vendor Code, Vendor Name, PO Number, Scroll
+  No, Invoice No, Invoice Date, Invoice Amount, Remarks (a header row is
+  detected and skipped). Drafts go to the Outlook folder **"Defective Invoice"**.
+- **Equipment Breakdown** - a two-column grid you paste straight into from
+  Excel: the identifier (RH/RO Number, Technical ID or Reg No) in the first
+  column and that machine's **Remarks** in the second. Everything else is
+  fetched from the Equipment Master, and the remark appears against its own
+  machine in the email table. A machine referenced twice by different
+  identifiers is listed once. Drafts go to **"Equipment Breakdown"**.
+
+Recipient addresses come from the vendor master. If a vendor has no email on
+file, a dialog lists those vendors so you can enter an address (saved back to
+the vendor master and logged) or tick **Skip**.
+
+The **CC address** is asked for once and reused. Change it via "Change CC" or
+by clicking the CC pill: the dialog opens pre-filled so you can edit it in
+place, validates before saving, and has a separate "Clear CC".
+
+"Preview Selected" opens the exact email in your browser before any draft is
+created. Email tables use a thick outer border, bold header row and
+content-fitted columns, and the default Outlook signature is preserved.
+
+**Outlook requirements:** Windows with Microsoft Outlook (Office 16 / Outlook
+2016) and `pywin32`. Elsewhere the rest of the app works normally and the tab
+says drafting is unavailable - preview still works everywhere.
 
 ## Tables
 
@@ -199,7 +205,7 @@ vendor_app/
   validators.py               field & record validation rules
   data_manager.py             VendorStore: load/save, upsert/merge, status,
                                delete, search - wired to the audit trail
-  audit.py                    AuditLog: append-only change history
+  audit.py                    ChangeLog: append-only history for both masters
   equipment.py                EquipmentStore: equipment master + lookups
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
@@ -223,5 +229,5 @@ vendor_app/
     edit_dialog.py                      shared add/edit record + status dialog
     missing_email_dialog.py              collect absent vendor emails
     paste_dialog.py                       generic 'paste rows' dialog
-data/                         local CSV stores, audit log, settings (git-ignored)
+data/                         local CSV stores, both change logs, settings (git-ignored)
 ```

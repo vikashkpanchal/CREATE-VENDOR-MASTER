@@ -118,7 +118,7 @@ class VendorStore:
             self.audit_log.record(code, vendor_name, audit_action, audit_details)
         return result
 
-    def bulk_upsert(self, raw_records: list) -> dict:
+    def bulk_upsert(self, raw_records: list, progress=None) -> dict:
         """Upsert a batch of raw records (e.g. from the bulk-entry grid).
 
         Blank rows are silently skipped. Each failure is collected instead
@@ -131,8 +131,11 @@ class VendorStore:
         errors = []
         audit_entries = []  # (vendor_code, vendor_name, action, details)
 
+        total = len(raw_records)
         with self._lock:
             for idx, raw in enumerate(raw_records, start=1):
+                if progress is not None and (idx % 200 == 0 or idx == total):
+                    progress(idx, total)
                 if is_blank_record(raw):
                     continue
                 try:
@@ -153,6 +156,42 @@ class VendorStore:
             self.audit_log.record_many(audit_entries)
 
         return {"added": added, "updated": updated, "errors": errors}
+
+    def update_field(self, code: str, key: str, value) -> bool:
+        """Edit ONE cell in place (used by the editable master grid).
+
+        Returns True when the value actually changed. Vendor Code is the
+        primary key and is never editable this way.
+        """
+        code = normalize(code)
+        if key == "vendor_code":
+            raise ValidationError(LABELS["vendor_code"], "cannot be changed")
+        if key == "status":
+            return self.set_status(code, normalize(value))
+        if key not in KEYS:
+            raise KeyError(key)
+
+        record = self._records.get(code)
+        if record is None:
+            return False
+        # Reuse the field rules the edit dialog and import path already use.
+        cleaned = validate_record({**{k: record.get(k, "") for k in KEYS}, key: value})
+        new_value, old_value = cleaned[key], record.get(key, "")
+        if new_value == old_value:
+            return False
+
+        with self._lock:
+            record[key] = new_value
+            record["updated_at"] = _now()
+            self.save()
+            vendor_name = record.get("vendor_name", "")
+
+        if self.audit_log is not None:
+            self.audit_log.record(
+                code, vendor_name, "Updated",
+                f"{LABELS[key]}: '{old_value}' -> '{new_value}'",
+            )
+        return True
 
     def set_status(self, code: str, status: str) -> bool:
         """Change only a vendor's lifecycle status (Active/Inactive/Blocked)."""

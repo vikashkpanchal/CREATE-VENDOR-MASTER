@@ -8,6 +8,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DATA_FILE = os.path.join(DATA_DIR, "vendor_master_store.csv")
 AUDIT_FILE = os.path.join(DATA_DIR, "vendor_audit_log.csv")
+EQUIPMENT_AUDIT_FILE = os.path.join(DATA_DIR, "equipment_audit_log.csv")
 
 # Bulk entry grid is capped at 100 rows to keep the UI smooth and lag-free.
 MAX_GRID_ROWS = 100
@@ -147,6 +148,30 @@ AUDIT_COLUMN_WIDTHS = {
     "actor": 120,
 }
 
+# The equipment master keeps its own change log, keyed by the machine's
+# identifier rather than a vendor code.
+EQUIPMENT_AUDIT_COLUMNS = [
+    "timestamp", "equipment_id", "equipment_description", "action", "details", "actor",
+]
+
+EQUIPMENT_AUDIT_WRAPPED_LABELS = {
+    "timestamp": "Date &\nTime",
+    "equipment_id": "Equipment\nID",
+    "equipment_description": "Equipment\nDescription",
+    "action": "Action",
+    "details": "Details",
+    "actor": "Changed\nBy",
+}
+
+EQUIPMENT_AUDIT_COLUMN_WIDTHS = {
+    "timestamp": 150,
+    "equipment_id": 130,
+    "equipment_description": 220,
+    "action": 130,
+    "details": 420,
+    "actor": 120,
+}
+
 # ------------------------------------------------------------- settings --
 # Small app-level preferences (e.g. the CC address used on every outgoing
 # email), stored once and reused so the user is only ever asked a single time.
@@ -168,6 +193,17 @@ EQUIPMENT_KEYS = [
     "reg_no",
     "rh_date",
     "plant",
+    # --- commercial / contract columns ---
+    "plant_code",
+    "validity_end_date",
+    "arc_no",
+    "fo_no",
+    "mcm_shift_code",
+    "disc_mcm_shift",
+    "mcm_shift_rate",
+    "ot_code",
+    "dic_ot",
+    "ot_rate",
 ]
 
 EQUIPMENT_LABELS = {
@@ -182,6 +218,16 @@ EQUIPMENT_LABELS = {
     "reg_no": "Reg No",
     "rh_date": "RH Date",
     "plant": "Plant",
+    "plant_code": "Plant Code",
+    "validity_end_date": "Validity End Date",
+    "arc_no": "ARC No",
+    "fo_no": "FO No",
+    "mcm_shift_code": "MCM/Shift Code",
+    "disc_mcm_shift": "Disc (MCM/Shift)",
+    "mcm_shift_rate": "MCM/Shift Rate",
+    "ot_code": "OT Code",
+    "dic_ot": "DIC (OT)",
+    "ot_rate": "OT Rate",
 }
 
 EQUIPMENT_WRAPPED_LABELS = {
@@ -197,6 +243,16 @@ EQUIPMENT_WRAPPED_LABELS = {
     "reg_no": "Reg\nNo",
     "rh_date": "RH\nDate",
     "plant": "Plant",
+    "plant_code": "Plant\nCode",
+    "validity_end_date": "Validity\nEnd Date",
+    "arc_no": "ARC\nNo",
+    "fo_no": "FO\nNo",
+    "mcm_shift_code": "MCM/Shift\nCode",
+    "disc_mcm_shift": "Disc\n(MCM/Shift)",
+    "mcm_shift_rate": "MCM/Shift\nRate",
+    "ot_code": "OT\nCode",
+    "dic_ot": "DIC\n(OT)",
+    "ot_rate": "OT\nRate",
 }
 
 EQUIPMENT_COLUMN_WIDTHS = {
@@ -212,6 +268,16 @@ EQUIPMENT_COLUMN_WIDTHS = {
     "reg_no": 140,
     "rh_date": 120,
     "plant": 120,
+    "plant_code": 110,
+    "validity_end_date": 140,
+    "arc_no": 130,
+    "fo_no": 130,
+    "mcm_shift_code": 140,
+    "disc_mcm_shift": 140,
+    "mcm_shift_rate": 130,
+    "ot_code": 110,
+    "dic_ot": 110,
+    "ot_rate": 110,
 }
 
 # Equipment lookup keys: pasting any ONE of these retrieves the full record.
@@ -219,6 +285,12 @@ EQUIPMENT_LOOKUP_KEYS = ["rh_ro_number", "technical_id", "reg_no"]
 
 # Technical ID is numeric; RH/RO Number is alphanumeric; Reg No is free text.
 EQUIPMENT_NUMERIC_FIELDS = {"technical_id"}
+
+# Columns treated as amounts on the dashboard / rate roll-ups.
+EQUIPMENT_RATE_FIELDS = {"mcm_shift_rate", "ot_rate", "disc_mcm_shift", "dic_ot"}
+
+# Columns the equipment change log and dashboard treat as dates.
+EQUIPMENT_DATE_FIELDS = {"rh_date", "validity_end_date"}
 
 # Equipment search results are capped at 50 records per the spec.
 MAX_EQUIPMENT_SEARCH_RESULTS = 50
@@ -265,6 +337,7 @@ BREAKDOWN_EMAIL_COLUMNS = [
     "rh_ro_number",
     "technical_id",
     "reg_no",
+    "remarks",
 ]
 
 BREAKDOWN_EMAIL_HEADERS = {
@@ -274,6 +347,7 @@ BREAKDOWN_EMAIL_HEADERS = {
     "rh_ro_number": "RH Code",
     "technical_id": "Technical ID",
     "reg_no": "REG NO",
+    "remarks": "Remarks",
 }
 
 # Outlook draft folders (created under the default account's Inbox if absent).
