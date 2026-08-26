@@ -13,6 +13,7 @@ import pandas as pd
 
 from vendor_app.config import (
     DATA_DIR,
+    DEMOB_FIELD,
     EQUIPMENT_FILE,
     EQUIPMENT_KEYS,
     EQUIPMENT_LABELS,
@@ -20,6 +21,11 @@ from vendor_app.config import (
     EQUIPMENT_NUMERIC_FIELDS,
 )
 from vendor_app.validators import ValidationError, normalize
+
+
+def is_demobbed(record: dict) -> bool:
+    """A machine with a De-mob Date has left site: its record is closed."""
+    return bool(normalize((record or {}).get(DEMOB_FIELD, "")))
 
 
 def equipment_id(record: dict) -> str:
@@ -100,14 +106,33 @@ class EquipmentStore:
         self._reindex()
 
     def _reindex(self):
-        """Rebuild the identifier -> record index. Later rows win on a clash,
-        matching 'last write wins' upsert behaviour."""
+        """Rebuild the identifier -> record index.
+
+        Only RUNNING records are indexed. A de-mobbed record is closed: it
+        must not absorb an update, and if the same machine comes back on
+        site its row has to be created fresh rather than reopening the old
+        one. Closed records stay searchable through _find_demobbed().
+        """
         self._index = {}
         for record in self._records:
+            if is_demobbed(record):
+                continue
             for key in EQUIPMENT_LOOKUP_KEYS:
                 value = record.get(key, "")
                 if value:
                     self._index[(key, value.lower())] = record
+
+    def _find_demobbed(self, identifier: str):
+        """The most recent closed record carrying this identifier."""
+        value = normalize(identifier).lower()
+        if not value:
+            return None
+        for record in reversed(self._records):
+            if not is_demobbed(record):
+                continue
+            if any(str(record.get(k, "")).lower() == value for k in EQUIPMENT_LOOKUP_KEYS):
+                return record
+        return None
 
     def save(self):
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -250,11 +275,87 @@ class EquipmentStore:
             "vendors_created": len(vendors_created),
         }
 
+    def demob(self, identifier: str, demob_date: str) -> dict:
+        """Close out one machine by any of its identifiers.
+
+        Returns {"status": ..., "record": ...} where status is:
+          "demobbed"       - the running record was closed
+          "already"        - that machine is already de-mobbed
+          "missing"        - no such identifier in the master
+        """
+        identifier = normalize(identifier)
+        demob_date = normalize(demob_date)
+        if not identifier:
+            return {"status": "missing", "record": None}
+        if not demob_date:
+            raise ValidationError(EQUIPMENT_LABELS[DEMOB_FIELD], "is required to de-mob")
+
+        with self._lock:
+            record = None
+            for key in EQUIPMENT_LOOKUP_KEYS:
+                record = self._index.get((key, identifier.lower()))
+                if record is not None:
+                    break
+            if record is None:
+                closed = self._find_demobbed(identifier)
+                return {"status": "already" if closed else "missing", "record": closed}
+
+            record[DEMOB_FIELD] = demob_date
+            self._reindex()      # drops it from the running index
+            self.save()
+            snapshot = dict(record)
+
+        if self.change_log is not None:
+            self.change_log.record(
+                equipment_id(snapshot), snapshot.get("equipment_description", ""),
+                "De-mobbed",
+                f"{EQUIPMENT_LABELS[DEMOB_FIELD]} set to '{demob_date}' - record closed "
+                "and locked; a later re-arrival is entered as a fresh record",
+            )
+        return {"status": "demobbed", "record": snapshot}
+
+    def demob_many(self, rows: list, progress=None) -> dict:
+        """De-mob a batch of (identifier, date) rows. Returns a summary."""
+        demobbed, already, missing, errors = 0, [], [], []
+        total = len(rows)
+        for index, row in enumerate(rows, start=1):
+            identifier = normalize(row.get("identifier", ""))
+            date = normalize(row.get("demob_date", ""))
+            if not identifier:
+                continue
+            try:
+                outcome = self.demob(identifier, date)
+            except ValidationError as exc:
+                errors.append((index, str(exc)))
+                continue
+            if outcome["status"] == "demobbed":
+                demobbed += 1
+            elif outcome["status"] == "already":
+                already.append(identifier)
+            else:
+                missing.append(identifier)
+            if progress is not None and (index % 50 == 0 or index == total):
+                progress(index, total)
+        return {"demobbed": demobbed, "already": already, "missing": missing, "errors": errors}
+
+    # ------------------------------------------------------- fleet views --
+    def running_records(self) -> list:
+        return [r for r in self._records if not is_demobbed(r)]
+
+    def demob_records(self) -> list:
+        return [r for r in self._records if is_demobbed(r)]
+
     def update_field(self, record: dict, key: str, value) -> bool:
         """Edit ONE cell in place (used by the editable grid). Returns True
         when the value actually changed."""
         if key not in EQUIPMENT_KEYS:
             raise KeyError(key)
+        if is_demobbed(record) and key != DEMOB_FIELD:
+            raise ValidationError(
+                EQUIPMENT_LABELS[key],
+                "cannot be edited - this machine is de-mobbed and its record is closed. "
+                "If it has returned to site, add it again as a new record.",
+            )
         new_value = normalize(value)
         old_value = record.get(key, "")
         if new_value == old_value:
@@ -304,8 +405,13 @@ class EquipmentStore:
             self.save()
 
     # ------------------------------------------------------------- Reads --
-    def lookup(self, identifier: str):
-        """Find one machine by ANY of RH/RO Number, Technical ID or Reg No."""
+    def lookup(self, identifier: str, include_demobbed: bool = True):
+        """Find one machine by ANY of RH/RO Number, Technical ID or Reg No.
+
+        The RUNNING record wins - that is the machine currently on site. A
+        closed record is only returned when nothing is running under that
+        identifier (and `include_demobbed` allows it).
+        """
         value = normalize(identifier).lower()
         if not value:
             return None
@@ -313,7 +419,7 @@ class EquipmentStore:
             found = self._index.get((key, value))
             if found is not None:
                 return found
-        return None
+        return self._find_demobbed(identifier) if include_demobbed else None
 
     def lookup_many(self, identifiers: list):
         """Resolve many identifiers, preserving input order and skipping

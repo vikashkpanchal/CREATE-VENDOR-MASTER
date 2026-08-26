@@ -35,7 +35,8 @@ class EditableTable(tk.Frame):
     """
 
     def __init__(self, master, columns, headers, widths, editable=None,
-                 on_edit=None, on_sort=None, on_double_click=None, height=None):
+                 on_edit=None, on_sort=None, on_double_click=None, height=None,
+                 double_click_edits=True, is_row_locked=None):
         super().__init__(master, bg=theme.BG_CARD, highlightthickness=1,
                          highlightbackground=theme.BORDER_SOFT)
         apply_dark_treeview_style()
@@ -46,6 +47,13 @@ class EditableTable(tk.Frame):
         self.on_edit = on_edit
         self.on_sort = on_sort
         self.on_double_click = on_double_click
+        # When False, double-click is handed to on_double_click (e.g. to open
+        # the full record dialog) and in-place editing is reached with
+        # Enter / F2 or the right-click menu instead.
+        self.double_click_edits = double_click_edits
+        # Optional predicate: rows it returns True for cannot be edited at all
+        # (used for de-mobbed equipment, whose records are closed).
+        self.is_row_locked = is_row_locked
 
         self._editor = None
         self._active = None        # (row_id, column_key) of the outlined cell
@@ -143,7 +151,7 @@ class EditableTable(tk.Frame):
         if not row_id or not column_key:
             return
         self._active = (row_id, column_key)
-        if column_key in self.editable:
+        if self.double_click_edits and column_key in self.editable and not self._locked(row_id):
             self._edit_active()
         elif self.on_double_click:
             self.on_double_click(row_id, column_key)
@@ -163,7 +171,9 @@ class EditableTable(tk.Frame):
                     self.tree.selection_set(row_id)
                 self._active = (row_id, column_key)
                 self._place_marker()
-        editable = bool(self._active and self._active[1] in self.editable)
+        editable = bool(
+            self._active and self._active[1] in self.editable and not self._locked(self._active[0])
+        )
         self.menu.entryconfigure("Edit cell", state="normal" if editable else "disabled")
         try:
             self.menu.tk_popup(event.x_root, event.y_root)
@@ -221,11 +231,23 @@ class EditableTable(tk.Frame):
         self._cell_marker.lift()
 
     # -------------------------------------------------------------- edit --
+    def _locked(self, row_id):
+        return bool(self.is_row_locked and self.is_row_locked(row_id))
+
     def _edit_active(self):
         if not self._active:
             return
         row_id, column_key = self._active
         if column_key not in self.editable or not self.tree.exists(row_id):
+            return
+        if self._locked(row_id):
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Record locked",
+                "This record is de-mobbed and closed, so it can no longer be edited.\n\n"
+                "If the machine has returned to site, add it again as a new record.",
+                parent=self.winfo_toplevel(),
+            )
             return
         bbox = self.tree.bbox(row_id, self.columns.index(column_key))
         if not bbox:

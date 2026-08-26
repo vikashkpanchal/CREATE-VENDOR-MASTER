@@ -161,7 +161,8 @@ class MainWindow(ctk.CTk):
         self.record_badge.configure(
             text=f"  {active:,} Active Vendor{'s' if active != 1 else ''}  "
         )
-        self.equipment_badge.configure(text=f"  {len(self.equipment_store):,} Equipment  ")
+        running = len(self.equipment_store.running_records())
+        self.equipment_badge.configure(text=f"  {running:,} Running Equipment  ")
 
         for tab in (self.vendor_tab, self.equipment_tab):
             if tab is not None:

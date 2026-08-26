@@ -14,18 +14,29 @@ import customtkinter as ctk
 
 from vendor_app.config import (
     EQUIPMENT_COLUMN_WIDTHS, EQUIPMENT_KEYS, EQUIPMENT_LABELS, EQUIPMENT_WRAPPED_LABELS,
+    FLEET_ALL, FLEET_DEMOB, FLEET_RUNNING, FLEET_FILTER_VALUES,
 )
+from vendor_app.equipment import is_demobbed
 from vendor_app.export import export_equipment_to_excel
 from vendor_app.gui import theme
 from vendor_app.gui.charts import BarChart, SplitBar
 from vendor_app.gui.editable_table import EditableTable
+from vendor_app.gui.filter_dropdown import FilterDropdown
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
 from vendor_app.gui.widgets import card, primary_button, secondary_button
 
-ALL = "All"
 TABLE_COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 TOP_N = 10
+
+# The dimensions offered as Excel-style multi-select filters.
+FILTER_FIELDS = [
+    ("vendor_name", "Vendor"),
+    ("equipment_description", "Equipment"),
+    ("capacity", "Capacity"),
+    ("ro_rh", "RO/RH"),
+    ("plant", "Plant"),
+]
 
 
 class DashboardTab(ctk.CTkFrame):
@@ -86,39 +97,40 @@ class DashboardTab(ctk.CTkFrame):
             "write", lambda *a: debounce(self, "_dash_search_after", 220, self.refresh)
         )
         ctk.CTkEntry(
-            search_holder, textvariable=self.search_var, width=220, height=32,
+            search_holder, textvariable=self.search_var, width=200, height=32,
             placeholder_text="Any field...",
             fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
         ).pack()
 
-        for key, label, width in (
-            ("vendor_name", "Vendor", 190),
-            ("equipment_description", "Equipment", 190),
-            ("capacity", "Capacity", 130),
-            ("ro_rh", "RO/RH", 100),
-            ("plant", "Plant", 130),
-        ):
-            holder = ctk.CTkFrame(row, fg_color="transparent")
-            holder.pack(side="left", padx=(0, 10))
-            ctk.CTkLabel(
-                holder, text=label, font=theme.font(10), text_color=theme.TEXT_MUTED, anchor="w"
-            ).pack(anchor="w")
-            var = ctk.StringVar(value=ALL)
-            menu = ctk.CTkOptionMenu(
-                holder, variable=var, values=[ALL], command=lambda *_: self.refresh(),
-                width=width, height=32, fg_color=theme.BG_INPUT,
-                button_color=theme.BG_CARD_ALT, button_hover_color=theme.BG_HOVER,
-                dropdown_fg_color=theme.BG_CARD_ALT, font=theme.small_font(),
-            )
-            menu.pack()
-            self._filters[key] = (var, menu)
+        # Fleet state is a single-choice filter and defaults to Running, so
+        # the dashboard describes the fleet actually on site.
+        fleet_holder = ctk.CTkFrame(row, fg_color="transparent")
+        fleet_holder.pack(side="left", padx=(0, 14))
+        ctk.CTkLabel(
+            fleet_holder, text="Fleet", font=theme.font(10),
+            text_color=theme.TEXT_MUTED, anchor="w",
+        ).pack(anchor="w")
+        self.fleet_var = ctk.StringVar(value=FLEET_RUNNING)
+        ctk.CTkOptionMenu(
+            fleet_holder, variable=self.fleet_var, values=FLEET_FILTER_VALUES,
+            command=lambda *_: self.refresh(), width=175, height=32,
+            fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+            button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            font=theme.small_font(),
+        ).pack()
+
+        for key, label in FILTER_FIELDS:
+            dropdown = FilterDropdown(row, label, on_change=self.refresh, width=175)
+            dropdown.pack(side="left", padx=(0, 10))
+            self._filters[key] = dropdown
 
     def _build_kpis(self, parent):
         strip = ctk.CTkFrame(parent, fg_color="transparent")
         strip.pack(fill="x", pady=(0, 12))
         self.kpi = {}
+        self.kpi_titles = {}
         for key, label in (
-            ("equipment", "Equipment Shown"),
+            ("equipment", "Running Equipment"),
             ("vendors", "Suppliers"),
             ("categories", "Equipment Types"),
             ("plants", "Plants"),
@@ -126,14 +138,16 @@ class DashboardTab(ctk.CTkFrame):
         ):
             box = card(strip, fg_color=theme.BG_CARD)
             box.pack(side="left", fill="x", expand=True, padx=(0, 10))
-            ctk.CTkLabel(
+            title_label = ctk.CTkLabel(
                 box, text=label, font=theme.small_font(), text_color=theme.TEXT_SECONDARY
-            ).pack(anchor="w", padx=16, pady=(14, 0))
+            )
+            title_label.pack(anchor="w", padx=16, pady=(14, 0))
             value = ctk.CTkLabel(
                 box, text="0", font=theme.display_font(), text_color=theme.TEXT_PRIMARY
             )
             value.pack(anchor="w", padx=16, pady=(0, 14))
             self.kpi[key] = value
+            self.kpi_titles[key] = title_label
 
     def _build_charts(self, parent):
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -181,34 +195,60 @@ class DashboardTab(ctk.CTkFrame):
         self.table.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
     # ------------------------------------------------------------ filters --
+    def _fleet_base(self):
+        """Records allowed by the fleet-state filter alone."""
+        choice = self.fleet_var.get() if hasattr(self, "fleet_var") else FLEET_RUNNING
+        if choice == FLEET_RUNNING:
+            return self.store.running_records()
+        if choice == FLEET_DEMOB:
+            return self.store.demob_records()
+        return self.store.all_records()
+
+    def _search_ok(self, record, query):
+        return not query or any(
+            query in str(record.get(k, "")).lower() for k in EQUIPMENT_KEYS
+        )
+
+    def _narrow(self, records, exclude=None):
+        """Apply every dimension filter except `exclude`.
+
+        Excluding one filter is what makes the set cascade like Excel: a
+        filter's own options are computed from the rows that survive all the
+        OTHER filters, so it always offers exactly the values still reachable.
+        """
+        for key, dropdown in self._filters.items():
+            if key == exclude:
+                continue
+            if dropdown.selected:
+                records = [r for r in records if dropdown.matches(str(r.get(key, "")).strip())]
+        return records
+
     def _refresh_filter_options(self):
-        """Repopulate each dropdown from the data, keeping current picks."""
-        records = self.store.all_records()
-        for key, (var, menu) in self._filters.items():
-            values = sorted({str(r.get(key, "")).strip() for r in records if str(r.get(key, "")).strip()})
-            menu.configure(values=[ALL] + values)
-            if var.get() != ALL and var.get() not in values:
-                var.set(ALL)
+        """Re-offer each filter the values still reachable through the others."""
+        base = [r for r in self._fleet_base()
+                if self._search_ok(r, self.search_var.get().strip().lower())]
+        changed = False
+        for key, dropdown in self._filters.items():
+            reachable = sorted({
+                str(r.get(key, "")).strip()
+                for r in self._narrow(base, exclude=key)
+                if str(r.get(key, "")).strip()
+            })
+            # A selection that is no longer reachable is dropped, which stops
+            # cascading filters from locking into an empty result.
+            changed = dropdown.set_values(reachable) or changed
+        return changed
 
     def _apply_filters(self):
-        records = self.store.all_records()
-        for key, (var, _menu) in self._filters.items():
-            chosen = var.get()
-            if chosen and chosen != ALL:
-                records = [r for r in records if str(r.get(key, "")).strip() == chosen]
-
-        query = self.search_var.get().strip().lower()
-        if query:
-            records = [
-                r for r in records
-                if any(query in str(r.get(k, "")).lower() for k in EQUIPMENT_KEYS)
-            ]
-        return records
+        records = [r for r in self._fleet_base()
+                   if self._search_ok(r, self.search_var.get().strip().lower())]
+        return self._narrow(records)
 
     def reset_filters(self):
         self.search_var.set("")
-        for _key, (var, _menu) in self._filters.items():
-            var.set(ALL)
+        self.fleet_var.set(FLEET_RUNNING)
+        for dropdown in self._filters.values():
+            dropdown.clear()
         self.refresh()
 
     # ------------------------------------------------------------ refresh --
@@ -220,6 +260,7 @@ class DashboardTab(ctk.CTkFrame):
         self.filtered = records
 
         self.kpi["equipment"].configure(text=f"{len(records):,}")
+        self.kpi_titles["equipment"].configure(text=self._fleet_kpi_label())
         self.kpi["vendors"].configure(
             text=f"{len({r.get('vendor_code') for r in records if r.get('vendor_code')}):,}"
         )
@@ -252,6 +293,14 @@ class DashboardTab(ctk.CTkFrame):
             text=f"showing {shown:,} of {len(records):,}"
             + ("  •  export for the full set" if len(records) > shown else "")
         )
+
+    def _fleet_kpi_label(self):
+        choice = self.fleet_var.get()
+        if choice == FLEET_RUNNING:
+            return "Running Equipment"
+        if choice == FLEET_DEMOB:
+            return "De-mob Equipment"
+        return "Equipment Shown"
 
     @staticmethod
     def _top(records, key, limit=TOP_N):

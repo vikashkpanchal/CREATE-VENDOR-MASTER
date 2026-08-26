@@ -42,6 +42,8 @@ class RecordsScreen(ctk.CTkFrame):
     paste_labels = {}
     paste_note = ""
 
+    DOUBLE_CLICK_EDITS = True
+
     def __init__(self, master, columns, headers, widths, editable_keys=(), on_data_changed=None):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.columns = columns
@@ -66,6 +68,8 @@ class RecordsScreen(ctk.CTkFrame):
     def export(self, records, path): raise NotImplementedError
     def delete_record(self, record): return False
     def extra_actions(self, parent): pass
+    def on_row_double_click(self, row_id, column_key): pass
+    def is_row_locked(self, row_id): return False
 
     # -------------------------------------------------------------- build --
     def _build(self):
@@ -131,6 +135,9 @@ class RecordsScreen(ctk.CTkFrame):
         self.table = EditableTable(
             wrap, self.columns, self.headers, self.widths,
             editable=self.editable_keys, on_edit=self._on_edit, on_sort=self._on_sort,
+            double_click_edits=self.DOUBLE_CLICK_EDITS,
+            on_double_click=self.on_row_double_click,
+            is_row_locked=self.is_row_locked,
         )
         self.table.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
 

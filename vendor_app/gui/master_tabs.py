@@ -94,6 +94,7 @@ class EquipmentMasterTab(_SubTabHost):
     def __init__(self, master, equipment_store, change_log, on_data_changed=None):
         from vendor_app.gui.audit_tab import AuditLogTab
         from vendor_app.gui.dashboard_tab import DashboardTab
+        from vendor_app.gui.demob_tab import DemobTab
         from vendor_app.gui.equipment_tab import EquipmentSearchScreen
         from vendor_app.gui.master_screens import EquipmentRecordsScreen
 
@@ -104,6 +105,9 @@ class EquipmentMasterTab(_SubTabHost):
                 parent, equipment_store, on_data_changed=on_data_changed
             ),
             "Search": lambda parent: EquipmentSearchScreen(parent, equipment_store),
+            "De-mob Equipment": lambda parent: DemobTab(
+                parent, equipment_store, on_data_changed=on_data_changed
+            ),
             "Dashboard": lambda parent: DashboardTab(parent, equipment_store),
             "Change Log": lambda parent: AuditLogTab(
                 parent, change_log,

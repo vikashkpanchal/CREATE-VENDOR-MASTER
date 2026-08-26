@@ -80,7 +80,7 @@ you can scan in a glance:
 | Tab | Sub-tabs |
 |-----|----------|
 | **Vendor Master** | Records · Search · Change Log |
-| **Equipment Master** | Records · Search · Dashboard · Change Log |
+| **Equipment Master** | Records · Search · De-mob Equipment · Dashboard · Change Log |
 | **Communication** | Defective Invoice · Equipment Breakdown |
 
 Every tab and sub-tab is built on first visit, so start-up stays fast.
@@ -89,10 +89,13 @@ Every tab and sub-tab is built on first visit, so start-up stays fast.
 
 Both masters share the same screen design, and both behave the same way.
 
-- **Directly editable.** Double-click any cell to edit it in place. `Enter`
-  commits, `Esc` cancels, `Tab` commits and moves to the next field. Every
-  commit goes through the store, so the same validation applies as anywhere
-  else and a rejected value is restored with the reason shown.
+- **Two ways to edit.** In the **vendor master**, double-clicking a row opens
+  the full record dialog. To change a single cell in either master, select it
+  and press `Enter` (or `F2`, or right-click → Edit cell): an editor opens over
+  the cell, `Enter` commits, `Esc` cancels, `Tab` moves on. In the equipment
+  master double-click edits the cell directly. Every commit goes through the
+  store, so the same validation applies as anywhere else and a rejected value
+  is restored with the reason shown.
 - **Copy out to Excel.** `Ctrl+C` copies the highlighted cell, or the whole
   selected block of rows as TSV, so it pastes into Excel as real cells.
   Right-click for Copy cell / Copy row(s) / Copy row(s) with headers.
@@ -120,9 +123,26 @@ email when it needs one).
 
 Alongside the identification columns (Equipment Description, UOM, Capacity,
 RO/RH, Vendor Code, Vendor Name, RH/RO Number, Technical ID, Reg No, RH Date,
-Plant) each machine carries its commercial terms: **Plant Code, Validity End
-Date, ARC No, FO No, MCM/Shift Code, Disc (MCM/Shift), MCM/Shift Rate, OT
-Code, DIC (OT), OT Rate**.
+**De-mob Date**, Plant) each machine carries its commercial terms: **Plant
+Code, Validity End Date, ARC No, FO No, MCM/Shift Code, Disc (MCM/Shift),
+MCM/Shift Rate, OT Code, DIC (OT), OT Rate**.
+
+### Running vs de-mobbed
+
+A machine with a **De-mob Date** has left site. That record is **closed**:
+
+- it drops out of every "Running Equipment" count (the header badge, the
+  Records grid and the dashboard all default to the running fleet);
+- it is **locked** - its cells can no longer be edited; and
+- its identifiers are released, so if that machine comes back it is entered
+  as a **brand-new, fully editable record**. The closed record stays as
+  history, and the change log records the de-mob and the new arrival.
+
+The **De-mob Equipment** sub-tab does this in bulk: paste identifiers
+(RH/RO Number, Technical ID or Reg No) in one column and the de-mob date in
+the next, with a fallback date for any blanks. It reports what was closed,
+what was already closed, and anything it could not find, and lists every
+de-mobbed machine alongside as read-only.
 
 Any one of RH/RO Number, Technical ID or Reg No identifies a machine, so
 search and import both work from whichever you have; rows are matched and
@@ -130,13 +150,20 @@ merged on any shared identifier. Technical ID must be numeric.
 
 ### Dashboard
 
-An interactive analytics view over the whole fleet. Filter by **vendor,
-equipment, capacity, RO/RH and plant**, or search any field - every KPI,
-chart and the results table recompute from the same filtered set, so the
-screen always agrees with itself.
+An interactive analytics view over the fleet. It opens on **Running
+Equipment**; the Fleet filter switches to de-mobbed machines or to
+everything.
 
-- KPI tiles: equipment shown, distinct suppliers, equipment types, plants,
-  and contracts whose validity ends within 30 days
+The dimension filters (**vendor, equipment, capacity, RO/RH, plant**) behave
+like Excel's column filters: **multi-select** with checkboxes, a search box
+and scrolling, and **cascading** - once one filter is applied the others
+offer only the values still reachable, not the whole list. A selection that
+a later filter makes unreachable is dropped, so the filters can never
+deadlock into an empty screen. Every KPI, chart and the results table
+recompute from the same filtered set.
+
+- KPI tiles: running (or de-mobbed) equipment, distinct suppliers, equipment
+  types, plants, and contracts whose validity ends within 30 days
 - **Top 10 suppliers** and **top 10 equipment types** by count, as ranked
   bars with hover detail
 - **RO vs RH** composition, and top capacities

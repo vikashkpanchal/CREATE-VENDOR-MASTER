@@ -192,6 +192,7 @@ EQUIPMENT_KEYS = [
     "technical_id",
     "reg_no",
     "rh_date",
+    "demob_date",
     "plant",
     # --- commercial / contract columns ---
     "plant_code",
@@ -217,6 +218,7 @@ EQUIPMENT_LABELS = {
     "technical_id": "Technical ID",
     "reg_no": "Reg No",
     "rh_date": "RH Date",
+    "demob_date": "De-mob Date",
     "plant": "Plant",
     "plant_code": "Plant Code",
     "validity_end_date": "Validity End Date",
@@ -242,6 +244,7 @@ EQUIPMENT_WRAPPED_LABELS = {
     "technical_id": "Technical\nID",
     "reg_no": "Reg\nNo",
     "rh_date": "RH\nDate",
+    "demob_date": "De-mob\nDate",
     "plant": "Plant",
     "plant_code": "Plant\nCode",
     "validity_end_date": "Validity\nEnd Date",
@@ -267,6 +270,7 @@ EQUIPMENT_COLUMN_WIDTHS = {
     "technical_id": 130,
     "reg_no": 140,
     "rh_date": 120,
+    "demob_date": 130,
     "plant": 120,
     "plant_code": 110,
     "validity_end_date": 140,
@@ -290,7 +294,19 @@ EQUIPMENT_NUMERIC_FIELDS = {"technical_id"}
 EQUIPMENT_RATE_FIELDS = {"mcm_shift_rate", "ot_rate", "disc_mcm_shift", "dic_ot"}
 
 # Columns the equipment change log and dashboard treat as dates.
-EQUIPMENT_DATE_FIELDS = {"rh_date", "validity_end_date"}
+EQUIPMENT_DATE_FIELDS = {"rh_date", "validity_end_date", "demob_date"}
+
+# A machine with a De-mob Date has left site. Such a record is FROZEN: its
+# cells can no longer be edited, it is excluded from "running" counts, and
+# if that same machine comes back it is entered as a brand-new record
+# rather than reopening the closed one.
+DEMOB_FIELD = "demob_date"
+
+# Running/De-mob filter values used on the dashboard and records screens.
+FLEET_RUNNING = "Running Equipment"
+FLEET_DEMOB = "De-mob Equipment"
+FLEET_ALL = "All Equipment"
+FLEET_FILTER_VALUES = [FLEET_RUNNING, FLEET_DEMOB, FLEET_ALL]
 
 # Equipment search results are capped at 50 records per the spec.
 MAX_EQUIPMENT_SEARCH_RESULTS = 50

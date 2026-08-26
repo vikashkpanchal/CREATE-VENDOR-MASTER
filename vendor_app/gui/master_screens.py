@@ -1,11 +1,15 @@
 """The two concrete master-data screens, built on RecordsScreen."""
 
+import customtkinter as ctk
+
 from vendor_app.config import (
     COLUMN_WIDTHS, DISPLAY_COLUMNS, EQUIPMENT_COLUMN_WIDTHS, EQUIPMENT_KEYS,
-    EQUIPMENT_LABELS, EQUIPMENT_WRAPPED_LABELS, KEYS, LABELS, STATUS_VALUES, WRAPPED_LABELS,
+    EQUIPMENT_LABELS, EQUIPMENT_WRAPPED_LABELS, FLEET_DEMOB, FLEET_FILTER_VALUES,
+    FLEET_RUNNING, KEYS, LABELS, STATUS_VALUES, WRAPPED_LABELS,
 )
 from vendor_app.export import export_equipment_to_excel, export_records_to_excel
 from vendor_app.importer import load_records_from_file
+from vendor_app.equipment import is_demobbed
 from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.records_screen import RecordsScreen
@@ -17,8 +21,11 @@ EQUIPMENT_COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 
 class VendorRecordsScreen(RecordsScreen):
     TITLE = "Vendor Records"
-    SUBTITLE = ("Every vendor, directly editable. Vendor Code is the primary key "
-                "and cannot be changed here.")
+    SUBTITLE = ("Double-click a row to open the full record. Select a cell and press "
+                "Enter to edit it in place. Vendor Code is the primary key.")
+    # Double-click opens the whole-record dialog (the familiar way to edit a
+    # vendor); in-place cell editing is still there on Enter / F2 / right-click.
+    DOUBLE_CLICK_EDITS = False
     IMPORT_LABEL = "Import Vendors..."
     EXPORT_PREFIX = "Export All"
     paste_keys = tuple(KEYS)
@@ -81,7 +88,31 @@ class VendorRecordsScreen(RecordsScreen):
     def delete_record(self, record):
         return bool(record) and self.store.delete(record["vendor_code"])
 
+    def on_row_double_click(self, row_id, column_key):
+        """Open the full vendor record, as double-click has always done."""
+        self.open_dialog(row_id)
+
+    def open_dialog(self, vendor_code):
+        from vendor_app.gui.edit_dialog import EditVendorDialog
+        record = self.store.get(vendor_code)
+        if record is None:
+            return
+        EditVendorDialog(self, self.store, record, on_saved=self._after_dialog)
+
+    def edit_selected(self):
+        ids = self.table.selected_ids()
+        if not ids:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Select a Row", "Select a vendor row first, or double-click it."
+            )
+            return
+        self.open_dialog(ids[0])
+
     def extra_actions(self, parent):
+        secondary_button(parent, "Edit Record", self.edit_selected, width=130).pack(
+            side="left", padx=(0, 8)
+        )
         secondary_button(parent, "+ Add Vendor", self.add_vendor, width=130).pack(side="left")
 
     def add_vendor(self):
@@ -96,8 +127,8 @@ class VendorRecordsScreen(RecordsScreen):
 
 class EquipmentRecordsScreen(RecordsScreen):
     TITLE = "Equipment Records"
-    SUBTITLE = ("Every hired machine, directly editable. A vendor referenced here "
-                "is added to the vendor master automatically.")
+    SUBTITLE = ("Running machines, directly editable. A vendor referenced here is added "
+                "to the vendor master automatically. De-mobbed records are locked.")
     IMPORT_LABEL = "Import Equipment..."
     EXPORT_PREFIX = "Export All"
     paste_keys = tuple(EQUIPMENT_KEYS)
@@ -113,8 +144,35 @@ class EquipmentRecordsScreen(RecordsScreen):
             editable_keys=set(EQUIPMENT_KEYS), on_data_changed=on_data_changed,
         )
 
+    def extra_actions(self, parent):
+        """Fleet switch: the grid shows the running fleet by default."""
+        holder = ctk.CTkFrame(parent, fg_color="transparent")
+        holder.pack(side="left", padx=(0, 8))
+        self.fleet_var = ctk.StringVar(value=FLEET_RUNNING)
+        ctk.CTkOptionMenu(
+            holder, variable=self.fleet_var, values=FLEET_FILTER_VALUES,
+            command=lambda *_: self.refresh(), width=175, height=34,
+            fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+            button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            font=theme.font(12, "bold"),
+        ).pack()
+
     def fetch(self, query):
-        return self.store.search(query or "")
+        choice = self.fleet_var.get() if hasattr(self, "fleet_var") else FLEET_RUNNING
+        if choice == FLEET_RUNNING:
+            pool = self.store.running_records()
+        elif choice == FLEET_DEMOB:
+            pool = self.store.demob_records()
+        else:
+            pool = self.store.all_records()
+
+        needle = (query or "").strip().lower()
+        if not needle:
+            return pool
+        return [
+            r for r in pool
+            if any(needle in str(r.get(k, "")).lower() for k in EQUIPMENT_KEYS)
+        ]
 
     def row_id(self, record):
         # Records have no single guaranteed key, so the grid uses the row's
@@ -123,6 +181,14 @@ class EquipmentRecordsScreen(RecordsScreen):
 
     def row_values(self, record, index):
         return [index] + [record.get(k, "") for k in EQUIPMENT_KEYS]
+
+    def row_status(self, record):
+        # Reuse the muted "inactive" row tint to show a closed record.
+        return "Inactive" if is_demobbed(record) else None
+
+    def is_row_locked(self, row_id):
+        record = self._rows.get(row_id)
+        return bool(record) and is_demobbed(record)
 
     def commit(self, row_id, key, value):
         record = self._rows.get(row_id)
