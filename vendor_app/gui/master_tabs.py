@@ -2,7 +2,8 @@
 
 Vendor Master      : Records | Search | Change Log
 Equipment Master   : Records | Search | De-mob | Dashboard | Change Log
-ARC & FO Master    : Structure | ARC Records | FO Records | Line Items | Change Log
+ARC & FO Master    : Dashboard | Structure | ARC Records | FO Records |
+                     Line Items | Change Log
 
 Sub-tabs are built lazily on first visit - each carries a table or chart
 canvas most sessions never open.
@@ -123,10 +124,13 @@ class EquipmentMasterTab(_SubTabHost):
 
 
 class ArcMasterTab(_SubTabHost):
-    """ARC & FO Master: Structure | ARC Records | FO Records | Line Items | Change Log.
+    """Dashboard | Structure | ARC Records | FO Records | Line Items | Change Log.
 
-    Structure comes first deliberately - the hierarchy is what the module is
-    about, and the flat grids are the way to bulk-edit what it shows.
+    The dashboard comes first deliberately: it answers the questions the data
+    is kept for - what is expiring, what has no order against it, where the
+    ARC and FO values diverge. Structure shows the hierarchy those figures
+    roll up through, and the flat grids are how the underlying rows are
+    imported and edited.
     """
 
     def __init__(self, master, arc_store, change_log, on_data_changed=None):
@@ -137,11 +141,13 @@ class ArcMasterTab(_SubTabHost):
         from vendor_app.gui.arc_screens import (
             ArcLineItemsScreen, ArcRecordsScreen, FoRecordsScreen,
         )
+        from vendor_app.gui.arc_dashboard_tab import ArcDashboardTab
         from vendor_app.gui.arc_structure_tab import ArcStructureTab
 
         self.store = arc_store
         self.change_log = change_log
         super().__init__(master, {
+            "Dashboard": lambda parent: ArcDashboardTab(parent, arc_store),
             "Structure": lambda parent: ArcStructureTab(parent, arc_store),
             "ARC Records": lambda parent: ArcRecordsScreen(
                 parent, arc_store, on_data_changed=on_data_changed

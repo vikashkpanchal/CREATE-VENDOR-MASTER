@@ -81,7 +81,7 @@ you can scan in a glance:
 |-----|----------|
 | **Vendor Master** | Records · Search · Change Log |
 | **Equipment Master** | Records · Search · De-mob Equipment · Dashboard · Change Log |
-| **ARC & FO Master** | Structure · ARC Records · FO Records · Line Items · Change Log |
+| **ARC & FO Master** | Dashboard · Structure · ARC Records · FO Records · Line Items · Change Log |
 | **Communication** | Defective Invoice · Equipment Breakdown |
 
 Every tab and sub-tab is built on first visit, so start-up stays fast.
@@ -195,15 +195,19 @@ ARC  (ARC No)           the master agreement - the key every amendment is filed 
   anywhere in the hierarchy - to a contract, an order or a line - is recorded
   in one change log against its **ARC No**, which is what makes the ARC the
   single place an amendment history lives.
-- **The ARC's value is never typed in.** A line's value is the figure entered,
-  or `Quantity x Rate` when that is blank. An FO's total is the sum of its
-  line items - or, while it has none, its own entered figure. And the **ARC's
-  value is the aggregate of the FOs beneath it**. Those columns are shown
-  read-only in the grids and as a read-out in the dialogs, so a contract value
-  can never disagree with the orders it is supposed to summarise.
-- **Structure** shows the whole tree with each parent's total, so any ARC
-  figure can be traced down to the references behind it. Double-click an ARC
-  or FO row there to open its record.
+- **Two values per contract, and only one of them is typed.** The ARC carries
+  the **target value released in SAP** as an ordinary field. What has actually
+  been *ordered* against it is never typed: a line's value is the figure
+  entered, or `Quantity x Rate` when that is blank; an FO's total is the sum
+  of its line items, or its own entered figure while it has none; and the
+  **FO Value (Sum)** on an ARC is the aggregate of the FOs beneath it. The gap
+  between the two - **Difference (ARC - FO)** - is the balance still open on
+  the contract. Every rolled-up column is read-only in the grids and a
+  read-out in the dialogs, so an ordered figure can never disagree with the
+  orders it summarises.
+- **Structure** shows the whole tree with each parent's total against the
+  ARC's target (`ordered / target`), so any figure can be traced down to the
+  references behind it. Double-click an ARC or FO row there to open its record.
 - **ARC Records / FO Records / Line Items** are the flat grids, with the same
   search, unlimited import, Excel-like paste, in-place editing and export as
   every other master.
@@ -212,6 +216,69 @@ ARC  (ARC No)           the master agreement - the key every amendment is filed 
   visible instead of silently disappearing.
 - Deleting an ARC removes the FOs and line items beneath it; deleting an FO
   removes its lines. Both are recorded in the log.
+
+### Import columns (ME3L / SAP FO report)
+
+The two grids carry the columns of the reports the data comes out of, in
+their order, so an untouched download imports without being reshaped first:
+
+| ARC Records (ME3L export) | FO Records (SAP FO report) |
+| --- | --- |
+| ARC No | FO No |
+| Vendor Code | ARC No |
+| Vendor Name | Vendor Code |
+| ARC Description | Vendor Name |
+| Validity Start | FO Start Date |
+| Validity End | FO End Date |
+| ARC Value (Target) | FO Value |
+| Plant | Released Value |
+| Purchasing Group | Open Value |
+| Release Status | Plant |
+| | Purchasing Group |
+
+Amendment No/Date, Status and Remarks follow on the ARC, and FO Description,
+Status and Remarks on the FO - the app's own fields, simply left blank by a
+raw export. Headers are matched three ways in turn: our own exported labels,
+the SAP names a raw download actually carries (`Agreement No`, `Short Text`,
+`Target Value`, `Valid From/To`, `Purchasing Grp`, `Released Value`, ...),
+and the internal column names. Unrecognised columns are ignored, not rejected.
+
+### Dashboard
+
+The first sub-tab, and the reason the data is kept. Built from one pass over
+the masters, so the cards, the charts and the tables always agree.
+
+**KPI cards** - Total ARC · Active ARC · Expired ARC · ARC Without FO ·
+Total ARC Value · Total FO · Total FO Value · ARC Expiring in 30 Days ·
+FO Expiring in 30 Days. They reflow into as many columns as the window fits,
+so none is ever pushed off the edge.
+
+**Sections, in the order the questions get asked:**
+
+| Section | Answers |
+| --- | --- |
+| ARC Expiry Analysis | status donut, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
+| FO Expiry Analysis | the same read on the orders - which need extending |
+| ARC Without FO | a contract is in place but nothing has been ordered against it, biggest first |
+| ARC vs FO Value Difference | `ARC Value - Sum of FO Values`, ranked by the size of the gap either way |
+| Vendor Analysis | ARC value against FO value per vendor, as paired bars and as a table |
+| High Risk ARC / FO | expiring within 30 days, and (for an ARC) under-ordered against its target |
+| Export Reports | every table above in one workbook |
+
+Nineteen analyses back those sections: ARC and FO counts, values, active and
+expired counts, 30/60/90-day expiry buckets for both, ARC Without FO, the ARC
+vs FO gap, the vendor-wise comparison, and the two risk lists.
+
+**Export** writes one `.xlsx`: the headline analyses on a `Summary` sheet,
+then the ARC and FO masters and every dashboard table, each on its own sheet.
+Each section also exports on its own. An empty report still gets its sheet -
+"nothing is expiring" is an answer, and a missing tab reads as a missing one.
+
+**Dates** are read leniently (`31.03.2027`, `2027-03-31`, `31/03/2027`,
+`31-Mar-2027`, ...). A date that cannot be read is **never guessed at**: the
+row is counted under "No Validity Date" and kept out of every expiry bucket,
+because calling such a contract active - or expired - would put the wrong one
+in front of a reader.
 
 ## Communication
 
@@ -285,12 +352,13 @@ vendor_app/
   audit.py                    ChangeLog: append-only history for both masters
   equipment.py                EquipmentStore: equipment master, lookups, de-mob
   arc.py                      ArcStore: ARC -> FO -> line items, with value roll-up
+  arc_analytics.py            the 19 ARC/FO analyses: expiry, gaps, risk, vendors
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
   outlook.py                  Outlook draft creation (Windows/pywin32)
   settings.py                 persisted preferences (per-flow CC addresses)
   importer.py                 mass-import: parse rows from a file
-  export.py                   .xlsx export (vendors, equipment, change logs)
+  export.py                   .xlsx export (vendors, equipment, ARC/FO, reports)
   gui/
     theme.py                   design tokens: colors, fonts, spacing, status colors
     widgets.py                  reusable buttons/badges/cards
@@ -299,11 +367,11 @@ vendor_app/
     style.py                     themed, sortable, hoverable Treeview + scrollbars
     editable_table.py            in-place cell editing + copy-out to Excel
     scroll_canvas.py             2-axis scrollable canvas
-    charts.py                    ranked-bar / split-bar charts on a Tk canvas
+    charts.py                    ranked-bar / split-bar / donut / paired-bar charts
     filter_dropdown.py           Excel-style multi-select cascading filter
     paste_grid.py                reusable Excel-like paste grid (Ctrl+V)
     paste_dialog.py              "Paste Rows" dialog built on the paste grid
-    main_window.py               app shell, branded header, 3 top-level tabs
+    main_window.py               app shell, branded header, 4 top-level tabs
     master_tabs.py                Vendor / Equipment master tabs + sub-tab host
     records_screen.py             shared editable master records screen
     master_screens.py             the two concrete master records screens
@@ -314,6 +382,7 @@ vendor_app/
     equipment_dialog.py            full machine record modal
     arc_screens.py                 ARC / FO / line-item records screens
     arc_structure_tab.py           the ARC -> FO -> line hierarchy view
+    arc_dashboard_tab.py           ARC & FO management dashboard
     arc_dialogs.py                 full ARC and FO record modals
     dashboard_tab.py               interactive equipment analytics
     audit_tab.py                   change log screen (serves both masters)

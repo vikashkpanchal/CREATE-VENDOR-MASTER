@@ -387,57 +387,76 @@ ARC_LINE_ITEM_FILE = os.path.join(DATA_DIR, "arc_line_items.csv")
 ARC_AUDIT_FILE = os.path.join(DATA_DIR, "arc_audit_log.csv")
 
 # --- ARC (the master) ------------------------------------------------------
+# The stored column set follows the ME3L export the ARC data is pulled out of,
+# in that report's own order, so a downloaded sheet imports without being
+# reshaped first. The four fields after Release Status are the app's own
+# (amendment tracking, lifecycle and notes) and are simply left blank by an
+# untouched ME3L file.
 ARC_KEYS = [
     "arc_no",
-    "arc_description",
     "vendor_code",
     "vendor_name",
-    "arc_start_date",
-    "arc_end_date",
+    "arc_description",
+    "arc_start_date",       # ME3L: Validity Start
+    "arc_end_date",         # ME3L: Validity End
+    "arc_value",            # ME3L: ARC Value / Target Value
+    "plant",
+    "purchasing_group",
+    "release_status",
     "amendment_no",
     "amendment_date",
-    "plant",
     "status",
     "remarks",
 ]
 
 ARC_LABELS = {
     "arc_no": "ARC No",
-    "arc_description": "ARC Description",
     "vendor_code": "Vendor Code",
     "vendor_name": "Vendor Name",
-    "arc_start_date": "ARC Start Date",
-    "arc_end_date": "ARC End Date",
+    "arc_description": "ARC Description",
+    "arc_start_date": "Validity Start",
+    "arc_end_date": "Validity End",
+    "arc_value": "ARC Value (Target)",
+    "plant": "Plant",
+    "purchasing_group": "Purchasing Group",
+    "release_status": "Release Status",
     "amendment_no": "Amendment No",
     "amendment_date": "Amendment Date",
-    "plant": "Plant",
     "status": "Status",
     "remarks": "Remarks",
 }
 
-# Columns the ARC grid derives rather than stores: they roll up from the FOs.
-ARC_DERIVED_KEYS = ["fo_count", "arc_value"]
+# Columns the ARC grid derives rather than stores. The target value is what
+# SAP released; the FO sum is what has actually been ordered against it, and
+# the difference between the two is the balance still open on the contract -
+# the figure this module exists to keep honest.
+ARC_DERIVED_KEYS = ["fo_count", "fo_value_total", "value_difference"]
 
 ARC_DERIVED_LABELS = {
-    "fo_count": "FOs",
-    "arc_value": "ARC Value (FO Total)",
+    "fo_count": "FO Count",
+    "fo_value_total": "FO Value (Sum)",
+    "value_difference": "Difference (ARC - FO)",
 }
 
-ARC_DISPLAY_COLUMNS = ARC_KEYS[:4] + ARC_DERIVED_KEYS + ARC_KEYS[4:]
+ARC_DISPLAY_COLUMNS = ARC_KEYS[:7] + ARC_DERIVED_KEYS + ARC_KEYS[7:]
 
 ARC_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",
     "arc_no": "ARC\nNo",
-    "arc_description": "ARC\nDescription",
     "vendor_code": "Vendor\nCode",
     "vendor_name": "Vendor\nName",
-    "fo_count": "FOs",
-    "arc_value": "ARC Value\n(FO Total)",
-    "arc_start_date": "ARC Start\nDate",
-    "arc_end_date": "ARC End\nDate",
+    "arc_description": "ARC\nDescription",
+    "arc_start_date": "Validity\nStart",
+    "arc_end_date": "Validity\nEnd",
+    "arc_value": "ARC Value\n(Target)",
+    "fo_count": "FO\nCount",
+    "fo_value_total": "FO Value\n(Sum)",
+    "value_difference": "Difference\n(ARC - FO)",
+    "plant": "Plant",
+    "purchasing_group": "Purchasing\nGroup",
+    "release_status": "Release\nStatus",
     "amendment_no": "Amendment\nNo",
     "amendment_date": "Amendment\nDate",
-    "plant": "Plant",
     "status": "Status",
     "remarks": "Remarks",
 }
@@ -445,34 +464,44 @@ ARC_WRAPPED_LABELS = {
 ARC_COLUMN_WIDTHS = {
     "sr_no": 64,
     "arc_no": 150,
-    "arc_description": 280,
     "vendor_code": 110,
-    "vendor_name": 240,
-    "fo_count": 70,
-    "arc_value": 150,
+    "vendor_name": 230,
+    "arc_description": 260,
     "arc_start_date": 120,
     "arc_end_date": 120,
+    "arc_value": 140,
+    "fo_count": 90,
+    "fo_value_total": 140,
+    "value_difference": 150,
+    "plant": 120,
+    "purchasing_group": 130,
+    "release_status": 120,
     "amendment_no": 120,
     "amendment_date": 130,
-    "plant": 120,
     "status": 110,
-    "remarks": 260,
+    "remarks": 240,
 }
 
 ARC_STATUS_VALUES = ["Active", "Amended", "Expired", "Closed"]
 ARC_STATUS_DEFAULT = "Active"
 
 # --- FO (the sub-part) -----------------------------------------------------
+# Mirrors the SAP FO report's columns. FO No leads because it is this table's
+# key and the grid's first column; ARC No follows immediately, since an FO
+# only means anything as a sub-part of its contract.
 FO_KEYS = [
     "fo_no",
     "arc_no",
-    "fo_description",
     "vendor_code",
     "vendor_name",
-    "fo_date",
-    "validity_end_date",
-    "plant",
+    "fo_description",
+    "fo_date",              # SAP: FO Start Date
+    "validity_end_date",    # SAP: FO End Date
     "fo_value",
+    "released_value",
+    "open_value",
+    "plant",
+    "purchasing_group",
     "status",
     "remarks",
 ]
@@ -480,13 +509,16 @@ FO_KEYS = [
 FO_LABELS = {
     "fo_no": "FO No",
     "arc_no": "ARC No",
-    "fo_description": "FO Description",
     "vendor_code": "Vendor Code",
     "vendor_name": "Vendor Name",
-    "fo_date": "FO Date",
-    "validity_end_date": "Validity End Date",
-    "plant": "Plant",
+    "fo_description": "FO Description",
+    "fo_date": "FO Start Date",
+    "validity_end_date": "FO End Date",
     "fo_value": "FO Value",
+    "released_value": "Released Value",
+    "open_value": "Open Value",
+    "plant": "Plant",
+    "purchasing_group": "Purchasing Group",
     "status": "Status",
     "remarks": "Remarks",
 }
@@ -500,21 +532,24 @@ FO_DERIVED_LABELS = {
     "fo_total": "FO Total (Effective)",
 }
 
-FO_DISPLAY_COLUMNS = FO_KEYS[:9] + FO_DERIVED_KEYS + FO_KEYS[9:]
+FO_DISPLAY_COLUMNS = FO_KEYS[:10] + FO_DERIVED_KEYS + FO_KEYS[10:]
 
 FO_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",
     "fo_no": "FO\nNo",
     "arc_no": "ARC\nNo",
-    "fo_description": "FO\nDescription",
     "vendor_code": "Vendor\nCode",
     "vendor_name": "Vendor\nName",
-    "fo_date": "FO\nDate",
-    "validity_end_date": "Validity\nEnd Date",
-    "plant": "Plant",
+    "fo_description": "FO\nDescription",
+    "fo_date": "FO Start\nDate",
+    "validity_end_date": "FO End\nDate",
     "fo_value": "FO Value\n(Entered)",
+    "released_value": "Released\nValue",
+    "open_value": "Open\nValue",
     "line_count": "Line\nItems",
     "fo_total": "FO Total\n(Effective)",
+    "plant": "Plant",
+    "purchasing_group": "Purchasing\nGroup",
     "status": "Status",
     "remarks": "Remarks",
 }
@@ -523,15 +558,18 @@ FO_COLUMN_WIDTHS = {
     "sr_no": 64,
     "fo_no": 150,
     "arc_no": 150,
-    "fo_description": 260,
     "vendor_code": 110,
-    "vendor_name": 240,
+    "vendor_name": 230,
+    "fo_description": 240,
     "fo_date": 120,
-    "validity_end_date": 130,
-    "plant": 120,
+    "validity_end_date": 120,
     "fo_value": 130,
+    "released_value": 130,
+    "open_value": 130,
     "line_count": 90,
     "fo_total": 150,
+    "plant": 120,
+    "purchasing_group": 130,
     "status": 110,
     "remarks": 240,
 }
@@ -600,7 +638,16 @@ ARC_LINE_COLUMN_WIDTHS = {
 
 # Fields carrying money/quantity, parsed leniently (commas and currency
 # symbols are tolerated) so a figure pasted straight out of Excel still adds up.
-ARC_NUMERIC_FIELDS = {"quantity", "rate", "line_value", "fo_value"}
+ARC_NUMERIC_FIELDS = {
+    "quantity", "rate", "line_value",
+    "arc_value", "fo_value", "released_value", "open_value",
+}
+
+# The expiry horizons every ARC/FO analysis is bucketed against. 30 days is
+# the one management acts on, so it leads and is the one the KPI cards and
+# the risk tables use.
+EXPIRY_WINDOWS = [30, 60, 90]
+ACTION_WINDOW = EXPIRY_WINDOWS[0]
 
 # The ARC master keeps its own change log, keyed by ARC No - which is exactly
 # what makes the ARC the master key for every amendment beneath it.

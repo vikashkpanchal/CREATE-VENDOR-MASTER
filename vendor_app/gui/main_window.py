@@ -4,7 +4,8 @@ The whole application is four things, and the navigation says so:
 
     Vendor Master     Records | Search | Change Log
     Equipment Master  Records | Search | De-mob | Dashboard | Change Log
-    ARC & FO Master   Structure | ARC Records | FO Records | Line Items | Change Log
+    ARC & FO Master   Dashboard | Structure | ARC Records | FO Records |
+                      Line Items | Change Log
     Communication     Defective Invoice | Equipment Breakdown
 
 Everything else is a sub-tab inside one of those four, so the top bar

@@ -154,3 +154,48 @@ def export_arc_lines_to_excel(records: list, path: str) -> str:
     from vendor_app.config import ARC_LINE_KEYS, ARC_LINE_LABELS
 
     return _export_simple(records, path, ARC_LINE_KEYS, ARC_LINE_LABELS, "ARC Line Items")
+
+
+def export_report_to_excel(report, path: str) -> str:
+    """Write one ARC/FO analysis report (see arc_analytics.Report) to .xlsx."""
+    headers = [report.headers(wrapped=False)[key] for key in report.columns]
+    rows = [dict(zip(headers, report.values(row))) for row in report.rows]
+    df = pd.DataFrame(rows, columns=headers)
+
+    sheet = report.title[:31]
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet)
+        _style_worksheet(writer.sheets[sheet], headers)
+    return path
+
+
+def export_arc_analysis_to_excel(analysis, path: str) -> str:
+    """The whole ARC & FO dashboard as one workbook.
+
+    Sheet 1 is the 19 headline analyses; every table on the dashboard then
+    follows on its own sheet, in the order the dashboard shows them, so the
+    workbook reads the same way the screen does.
+    """
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        summary = pd.DataFrame(analysis.summary_rows(), columns=["Analysis", "Value"])
+        summary.to_excel(writer, index=False, sheet_name="Summary")
+        _style_worksheet(writer.sheets["Summary"], ["Analysis", "Value"])
+
+        used = {"Summary"}
+        for report in analysis.full_reports():
+            headers = [report.headers(wrapped=False)[key] for key in report.columns]
+            rows = [dict(zip(headers, report.values(row))) for row in report.rows]
+            # An empty report still gets its sheet: "nothing is expiring" is
+            # an answer, and a missing tab reads as a missing analysis.
+            frame = pd.DataFrame(rows, columns=headers)
+
+            sheet = report.title[:31]
+            suffix = 2
+            while sheet in used:
+                sheet = f"{report.title[:28]} {suffix}"
+                suffix += 1
+            used.add(sheet)
+
+            frame.to_excel(writer, index=False, sheet_name=sheet)
+            _style_worksheet(writer.sheets[sheet], headers)
+    return path

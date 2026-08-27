@@ -25,17 +25,77 @@ from vendor_app.validators import ValidationError
 from vendor_app.gui.records_screen import RecordsScreen
 
 
+# The headers a raw ME3L / SAP FO download actually carries, mapped onto our
+# fields. Without these an untouched export has to be renamed column by column
+# before it will import, which is exactly the manual step this module removes.
+HEADER_ALIASES = {
+    # ARC / outline agreement
+    "agreement no": "arc_no",
+    "agreement": "arc_no",
+    "outline agreement": "arc_no",
+    "contract no": "arc_no",
+    "purchasing document": "arc_no",
+    "short text": "arc_description",
+    "description": "arc_description",
+    "target value": "arc_value",
+    "arc value": "arc_value",
+    "arc value (target value)": "arc_value",
+    "net value": "arc_value",
+    "validity start": "arc_start_date",
+    "validity start date": "arc_start_date",
+    "valid from": "arc_start_date",
+    "validity end": "arc_end_date",
+    "validity end date": "arc_end_date",
+    "valid to": "arc_end_date",
+    "purchasing group": "purchasing_group",
+    "purchasing grp": "purchasing_group",
+    "pur group": "purchasing_group",
+    "release status": "release_status",
+    "release indicator": "release_status",
+    "vendor": "vendor_name",
+    "supplier": "vendor_name",
+    "supplier name": "vendor_name",
+    "vendor no": "vendor_code",
+    "supplier code": "vendor_code",
+    "plant code": "plant",
+    # FO / frame order
+    "fo": "fo_no",
+    "frame order": "fo_no",
+    "frame order no": "fo_no",
+    "fo start date": "fo_date",
+    "fo start": "fo_date",
+    "fo end date": "validity_end_date",
+    "fo end": "validity_end_date",
+    "fo validity end": "validity_end_date",
+    "released value": "released_value",
+    "open value": "open_value",
+    "balance value": "open_value",
+    "fo value": "fo_value",
+}
+
+
 def _load_rows(path, keys, labels):
-    """Read a spreadsheet of rows for one level, matching headers by label."""
+    """Read a spreadsheet of rows for one level, matching headers by label.
+
+    Three header shapes are accepted, in order: our own exported labels, the
+    SAP/ME3L headers above, and our internal snake_case column names - so an
+    export from this app, a raw download and the stored CSV all import.
+    """
     frame = _read_table(path)
     label_to_key = {_normalize_header(v): k for k, v in labels.items()}
     columns = {}
     for column in frame.columns:
         header = _normalize_header(column)
-        if header in label_to_key:
-            columns[label_to_key[header]] = column
-        elif header.replace(" ", "_") in keys:
-            columns[header.replace(" ", "_")] = column
+        key = label_to_key.get(header)
+        if key is None:
+            alias = HEADER_ALIASES.get(header)
+            # An alias only applies to the level being imported: "Description"
+            # must not drop an FO's text onto an ARC field, and vice versa.
+            key = alias if alias in keys else None
+        if key is None and header.replace(" ", "_") in keys:
+            key = header.replace(" ", "_")
+        if key is not None and key not in columns:
+            columns[key] = column
     return [
         {key: str(row.get(column, "")).strip() for key, column in columns.items()}
         for _, row in frame.iterrows()
@@ -46,8 +106,9 @@ class ArcRecordsScreen(RecordsScreen):
     """The ARC master itself - the key every amendment is filed against."""
 
     TITLE = "ARC Records"
-    SUBTITLE = ("The master agreement. Double-click a row to open the full ARC. "
-                "ARC Value is the aggregate of the FOs beneath it and is not typed in.")
+    SUBTITLE = ("The master agreement, in ME3L column order. Double-click a row to "
+                "open the full ARC. FO Value and the difference against the ARC's "
+                "target are rolled up from the FOs, not typed in.")
     DOUBLE_CLICK_EDITS = False
     IMPORT_LABEL = "Import ARCs..."
     paste_keys = tuple(ARC_KEYS)
@@ -78,7 +139,8 @@ class ArcRecordsScreen(RecordsScreen):
 
     def commit(self, row_id, key, value):
         if key in ARC_DERIVED_KEYS:
-            return "ARC Value and FO count are rolled up from the FOs - edit the FOs instead."
+            return ("FO count, FO value and the difference are rolled up from the FOs - "
+                    "edit the FOs, or the ARC's own target value, instead.")
         try:
             self.store.update_arc_field(row_id, key, value)
         except ValidationError as exc:
@@ -138,8 +200,9 @@ class FoRecordsScreen(RecordsScreen):
     """The FOs: sub-parts of an ARC, many per contract."""
 
     TITLE = "FO Records"
-    SUBTITLE = ("Framework orders issued under an ARC. Every FO names its ARC. "
-                "FO Total is the sum of its line items once it has any.")
+    SUBTITLE = ("Framework orders issued under an ARC, in SAP FO report column order. "
+                "Every FO names its ARC. FO Total is the sum of its line items "
+                "once it has any.")
     DOUBLE_CLICK_EDITS = False
     IMPORT_LABEL = "Import FOs..."
     paste_keys = tuple(FO_KEYS)

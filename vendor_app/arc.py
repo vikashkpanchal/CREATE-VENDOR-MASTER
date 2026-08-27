@@ -22,6 +22,7 @@ with the orders it is supposed to summarise.
 import os
 import re
 import threading
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -70,6 +71,61 @@ def format_amount(value: float) -> str:
     if abs(value - round(value)) < 0.005:
         return f"{int(round(value)):,}"
     return f"{value:,.2f}"
+
+
+# Dates arrive from ME3L/SAP exports and from hand-typed cells alike, so
+# every shape either of those produces has to read. SAP's own dotted format
+# leads because that is what an untouched download contains.
+DATE_FORMATS = (
+    "%d.%m.%Y", "%d.%m.%y",
+    "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
+    "%d-%b-%Y", "%d %b %Y", "%Y/%m/%d", "%d-%m-%y", "%d/%m/%y",
+)
+
+
+def parse_date(value):
+    """Read a validity date leniently. Returns a date, or None if unreadable.
+
+    An unreadable date must never be guessed at: it is reported as "no date"
+    and counted separately, because silently treating it as expired - or as
+    active - would put a wrong contract in front of management.
+    """
+    text = normalize(value)
+    if not text:
+        return None
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def days_until(value, today=None) -> int:
+    """Days from `today` to `value`; negative once it has passed.
+
+    Returns None when the date cannot be read, so callers can keep those
+    rows out of the expiry buckets instead of bucketing them wrongly.
+    """
+    end = parse_date(value)
+    if end is None:
+        return None
+    return (end - (today or date.today())).days
+
+
+def display_amount(text) -> str:
+    """A money cell tidied with thousands separators for the grid.
+
+    Only when the cell is plainly a number. Anything carrying letters - a
+    note, a unit, "1.5 Cr" - is shown exactly as it was typed, because
+    rewriting it would turn a figure into something it may not mean. The
+    stored value is never changed by this; it is a display pass only.
+    """
+    raw = normalize(text)
+    if not raw or any(ch.isalpha() for ch in raw):
+        return raw
+    value = parse_amount(raw)
+    return format_amount(value) if value else raw
 
 
 def _clean(raw: dict, keys) -> dict:
@@ -226,21 +282,38 @@ class ArcStore:
         record = self.fos.find(fo_no)
         return parse_amount(record.get("fo_value", "")) if record else 0.0
 
-    def arc_value(self, arc_no) -> float:
-        """The ARC's total: the aggregate of every FO beneath it."""
+    def fo_value_for_arc(self, arc_no) -> float:
+        """What has actually been ordered against an ARC: the sum of its FOs."""
         return sum(self.fo_total(f.get("fo_no", "")) for f in self.fos_for_arc(arc_no))
+
+    def arc_target_value(self, arc_no) -> float:
+        """The ARC's own released value, as it came out of ME3L."""
+        record = self.arcs.find(arc_no)
+        return parse_amount(record.get("arc_value", "")) if record else 0.0
+
+    def value_gap(self, arc_no) -> float:
+        """ARC Value - Sum of FO Values: the balance still open on the contract.
+
+        Positive means budget released but not yet ordered against; negative
+        means the FOs have over-run the contract, which is the alarming case.
+        """
+        return self.arc_target_value(arc_no) - self.fo_value_for_arc(arc_no)
 
     def arc_row(self, record: dict) -> dict:
         """An ARC record plus its derived columns, ready for the grid."""
         arc_no = record.get("arc_no", "")
         enriched = dict(record)
+        enriched["arc_value"] = display_amount(record.get("arc_value", ""))
         enriched["fo_count"] = str(len(self.fos_for_arc(arc_no)))
-        enriched["arc_value"] = format_amount(self.arc_value(arc_no))
+        enriched["fo_value_total"] = format_amount(self.fo_value_for_arc(arc_no))
+        enriched["value_difference"] = format_amount(self.value_gap(arc_no))
         return enriched
 
     def fo_row(self, record: dict) -> dict:
         fo_no = record.get("fo_no", "")
         enriched = dict(record)
+        for key in ("fo_value", "released_value", "open_value"):
+            enriched[key] = display_amount(record.get(key, ""))
         enriched["line_count"] = str(len(self.lines_for_fo(fo_no)))
         enriched["fo_total"] = format_amount(self.fo_total(fo_no))
         return enriched
@@ -255,12 +328,15 @@ class ArcStore:
 
     def summary(self) -> dict:
         arcs = self.all_arcs()
-        total = sum(self.arc_value(a.get("arc_no", "")) for a in arcs)
+        fo_value = sum(self.fo_value_for_arc(a.get("arc_no", "")) for a in arcs)
+        target = sum(parse_amount(a.get("arc_value", "")) for a in arcs)
         return {
             "arcs": len(arcs),
             "fos": len(self.fos.records),
             "lines": len(self.lines.records),
-            "value": total,
+            "value": fo_value,
+            "target_value": target,
+            "gap": target - fo_value,
             "orphan_fos": len([
                 f for f in self.fos.records
                 if self.arcs.find(f.get("arc_no", "")) is None
@@ -288,7 +364,12 @@ class ArcStore:
                         for l in self.lines_for_fo(fo_no)
                     ],
                 })
-            tree.append({"record": arc, "fos": fos, "total": self.arc_value(arc_no)})
+            tree.append({
+                "record": arc,
+                "fos": fos,
+                "total": self.fo_value_for_arc(arc_no),
+                "target": parse_amount(arc.get("arc_value", "")),
+            })
 
         known = {a.get("arc_no", "").lower() for a in self.arcs.records}
         orphans = [f for f in self.fos.records if f.get("arc_no", "").lower() not in known]
@@ -309,6 +390,7 @@ class ArcStore:
                            "FOs whose ARC No does not match any ARC record"},
                 "fos": fos,
                 "total": sum(f["total"] for f in fos),
+                "target": 0.0,
                 "orphan": True,
             })
         return tree

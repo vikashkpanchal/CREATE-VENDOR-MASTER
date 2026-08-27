@@ -4,10 +4,11 @@ Both follow the vendor dialog's shape: the action bar is reserved at the
 bottom before the scrolling body, so Save can never be pushed off-screen on
 a short or scaled display.
 
-Neither dialog lets you type a total. An ARC shows what its FOs add up to,
-an FO shows what its line items add up to, and both show it as a read-out
-rather than a field - a contract value that disagrees with its own orders
-is the one thing this module exists to prevent.
+Neither dialog lets you type a rolled-up total. An ARC carries the target
+value released in SAP as an ordinary field, but what has actually been
+ordered against it - the sum of its FOs - is a read-out, as is an FO's
+line-item total. A figure that disagrees with its own detail is the one
+thing this module exists to prevent, so no such figure is ever typed.
 """
 
 import customtkinter as ctk
@@ -180,12 +181,14 @@ class ArcDialog(_RecordDialog):
     TITLE_NEW = "Add ARC"
     TITLE_EDIT = "Edit ARC"
     HINT = ("ARC No is the master key - every FO and every amendment is filed "
-            "against it. The ARC's value is the total of its FOs and is shown, "
-            "not entered.")
+            "against it. ARC Value is the target released in SAP; what has "
+            "actually been ordered against it is shown above, not typed in.")
     SECTIONS = (
-        ("CONTRACT", ["arc_no", "arc_description", "plant", "status"]),
+        ("CONTRACT", ["arc_no", "arc_description", "plant", "purchasing_group",
+                      "release_status", "status"]),
         ("VENDOR", ["vendor_code", "vendor_name"]),
         ("VALIDITY", ["arc_start_date", "arc_end_date"]),
+        ("VALUE", ["arc_value"]),
         ("AMENDMENT", ["amendment_no", "amendment_date", "remarks"]),
     )
 
@@ -194,9 +197,20 @@ class ArcDialog(_RecordDialog):
             return None
         arc_no = self.record.get("arc_no", "")
         fos = self.store.fos_for_arc(arc_no)
-        total = self.store.arc_value(arc_no)
-        return (f"ARC Value: {format_amount(total)}\n"
-                f"Aggregated from {len(fos)} FO(s) under this ARC.")
+        ordered = self.store.fo_value_for_arc(arc_no)
+        target = self.store.arc_target_value(arc_no)
+        gap = target - ordered
+        lines = [
+            f"ARC Value (target): {format_amount(target)}",
+            f"Ordered on {len(fos)} FO(s): {format_amount(ordered)}",
+        ]
+        if gap > 0:
+            lines.append(f"Balance still to order: {format_amount(gap)}")
+        elif gap < 0:
+            lines.append(f"OVER-ORDERED by {format_amount(-gap)} against this ARC")
+        else:
+            lines.append("Fully ordered against.")
+        return "\n".join(lines)
 
     def persist(self, raw):
         return self.store.upsert_arc(raw)
@@ -214,10 +228,11 @@ class FoDialog(_RecordDialog):
             "has line items they become its value; the figure below is only used "
             "while it has none.")
     SECTIONS = (
-        ("ORDER", ["fo_no", "arc_no", "fo_description", "plant", "status"]),
+        ("ORDER", ["fo_no", "arc_no", "fo_description", "plant", "purchasing_group",
+                   "status"]),
         ("VENDOR", ["vendor_code", "vendor_name"]),
         ("VALIDITY", ["fo_date", "validity_end_date"]),
-        ("VALUE", ["fo_value", "remarks"]),
+        ("VALUE", ["fo_value", "released_value", "open_value", "remarks"]),
     )
 
     def rollup_text(self):

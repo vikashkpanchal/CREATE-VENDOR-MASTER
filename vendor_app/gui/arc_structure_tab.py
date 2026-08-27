@@ -29,13 +29,13 @@ HEADERS = {
     "description": "Description",
     "vendor": "Vendor",
     "dates": "Dates",
-    "value": "Value",
+    "value": "Value (Ordered / Target)",
 }
 # Sized so the Value column - the number this whole view exists to show -
 # lands inside the panel without anyone having to scroll right for it.
 WIDTHS = {
-    "#0": 250, "level": 78, "reference": 135, "description": 272,
-    "vendor": 195, "dates": 165, "value": 135,
+    "#0": 235, "level": 74, "reference": 128, "description": 250,
+    "vendor": 180, "dates": 158, "value": 190,
 }
 
 
@@ -58,7 +58,8 @@ class ArcStructureTab(ctk.CTkFrame):
         ctk.CTkLabel(
             left,
             text="Every ARC with the FOs beneath it and the line items behind each FO. "
-                 "A parent's value is always the sum of its children.",
+                 "A parent's value is always the sum of its children, shown against "
+                 "the ARC's own target value.",
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
@@ -135,7 +136,8 @@ class ArcStructureTab(ctk.CTkFrame):
         self.kpi = {}
         for key, label in (
             ("arcs", "ARCs"), ("fos", "FOs"), ("lines", "Line Items"),
-            ("value", "Total ARC Value"), ("orphan_fos", "FOs Without an ARC"),
+            ("target_value", "Total ARC Value"), ("value", "Ordered on FOs"),
+            ("orphan_fos", "FOs Without an ARC"),
         ):
             box = card(strip, fg_color=theme.BG_CARD)
             box.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -179,7 +181,7 @@ class ArcStructureTab(ctk.CTkFrame):
                     arc.get("arc_description", ""),
                     self._vendor(arc),
                     self._dates(arc.get("arc_start_date", ""), arc.get("arc_end_date", "")),
-                    format_amount(node["total"]),
+                    self._arc_value(node),
                 ],
             )
             for fo in node["fos"]:
@@ -217,6 +219,7 @@ class ArcStructureTab(ctk.CTkFrame):
         self.kpi["arcs"].configure(text=f"{summary['arcs']:,}")
         self.kpi["fos"].configure(text=f"{summary['fos']:,}")
         self.kpi["lines"].configure(text=f"{summary['lines']:,}")
+        self.kpi["target_value"].configure(text=format_amount(summary["target_value"]))
         self.kpi["value"].configure(text=format_amount(summary["value"]))
         self.kpi["orphan_fos"].configure(text=f"{summary['orphan_fos']:,}")
         self.count_pill.configure(
@@ -230,6 +233,18 @@ class ArcStructureTab(ctk.CTkFrame):
         if code and name:
             return f"{code} - {name}"
         return code or name
+
+    @staticmethod
+    def _arc_value(node):
+        """Ordered against the ARC, and the target it was released for.
+
+        Both figures belong in the same cell: the roll-up on its own says
+        nothing about whether the contract is under- or over-used, which is
+        the question this column is read for.
+        """
+        ordered = format_amount(node["total"])
+        target = node.get("target") or 0.0
+        return f"{ordered} / {format_amount(target)}" if target else ordered
 
     @staticmethod
     def _dates(start, end):
