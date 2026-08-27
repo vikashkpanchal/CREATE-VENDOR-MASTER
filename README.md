@@ -100,8 +100,10 @@ Both masters share the same screen design, and both behave the same way.
   selected block of rows as TSV, so it pastes into Excel as real cells.
   Right-click for Copy cell / Copy row(s) / Copy row(s) with headers.
 - **Unlimited import.** "Import..." reads an `.xlsx`/`.xls`/`.csv`/`.tsv` of
-  any size, and "Paste Rows" takes any number of pasted rows. There is no row
-  cap. Long imports run on a background thread behind a progress dialog that
+  any size, and **"Paste Rows" opens an Excel-like grid** - one column per
+  field, so you click the first cell you need and `Ctrl+V` a block straight
+  out of Excel and it lands in the right columns. Type into it, arrow around
+  it, `Tab`/`Enter` between cells. There is no row cap. Long imports run on a background thread behind a progress dialog that
   shows live row counts - the window keeps painting instead of going blank.
 - **Full change log.** Each master keeps its own append-only log
   (`data/vendor_audit_log.csv`, `data/equipment_audit_log.csv`) recording every
@@ -154,7 +156,8 @@ An interactive analytics view over the fleet. It opens on **Running
 Equipment**; the Fleet filter switches to de-mobbed machines or to
 everything.
 
-The dimension filters (**vendor, equipment, capacity, RO/RH, plant**) behave
+The dimension filters (**vendor, equipment, capacity, RO/RH, plant, plant
+code**) behave
 like Excel's column filters: **multi-select** with checkboxes, a search box
 and scrolling, and **cascading** - once one filter is applied the others
 offer only the values still reachable, not the whole list. A selection that
@@ -227,34 +230,44 @@ exports use their own layouts.
 ```
 main.py                      entry point
 vendor_app/
-  config.py                  field keys/labels, storage paths, grid row cap,
-                              wrapped table headers, column widths, status values
+  config.py                  field keys/labels, storage paths, wrapped table
+                              headers, column widths, status values, de-mob field
   validators.py               field & record validation rules
   data_manager.py             VendorStore: load/save, upsert/merge, status,
-                               delete, search - wired to the audit trail
+                               delete, search - wired to the change log
   audit.py                    ChangeLog: append-only history for both masters
-  equipment.py                EquipmentStore: equipment master + lookups
+  equipment.py                EquipmentStore: equipment master, lookups, de-mob
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
   outlook.py                  Outlook draft creation (Windows/pywin32)
   settings.py                 persisted preferences (CC address)
-  importer.py                 mass-import: parse vendor rows from a file
-  export.py                   dynamic-column .xlsx export (vendors + audit log)
+  importer.py                 mass-import: parse rows from a file
+  export.py                   .xlsx export (vendors, equipment, change logs)
   gui/
     theme.py                   design tokens: colors, fonts, spacing, status colors
     widgets.py                  reusable buttons/badges/cards
     toast.py                    non-blocking success/info notifications
+    loading.py                  threaded progress dialog for long imports
     style.py                     themed, sortable, hoverable Treeview + scrollbars
-    scroll_canvas.py             2-axis scrollable canvas (bulk grid)
-    main_window.py               app shell, branded header, 4-tab layout
-    search_tab.py                 Tab 1 — single/multi search
-    master_tab.py                  Tab 2 — master directory + stat strip
-    grid_tab.py                     Tab 3 — bulk entry grid + file import
-    equipment_tab.py                 Tab 4 — equipment master + searches
-    communication_tab.py              Tab 5 — the two email flows
-    audit_tab.py                       Tab 6 — audit trail
-    edit_dialog.py                      shared add/edit record + status dialog
-    missing_email_dialog.py              collect absent vendor emails
-    paste_dialog.py                       generic 'paste rows' dialog
+    editable_table.py            in-place cell editing + copy-out to Excel
+    scroll_canvas.py             2-axis scrollable canvas
+    charts.py                    ranked-bar / split-bar charts on a Tk canvas
+    filter_dropdown.py           Excel-style multi-select cascading filter
+    paste_grid.py                reusable Excel-like paste grid (Ctrl+V)
+    paste_dialog.py              "Paste Rows" dialog built on the paste grid
+    main_window.py               app shell, branded header, 3 top-level tabs
+    master_tabs.py                Vendor / Equipment master tabs + sub-tab host
+    records_screen.py             shared editable master records screen
+    master_screens.py             the two concrete master records screens
+    search_tab.py                  vendor search
+    master_tab.py                  vendor master directory + stat strip
+    equipment_tab.py               equipment search
+    demob_tab.py                   bulk de-mob + de-mobbed equipment list
+    dashboard_tab.py               interactive equipment analytics
+    audit_tab.py                   change log screen (serves both masters)
+    communication_tab.py           the two email flows
+    edit_dialog.py                 shared add/edit record + status dialog
+    cc_dialog.py                   editable, pre-filled CC address dialog
+    missing_email_dialog.py        collect absent vendor emails
 data/                         local CSV stores, both change logs, settings (git-ignored)
 ```

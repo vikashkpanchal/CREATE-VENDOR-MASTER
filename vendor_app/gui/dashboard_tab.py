@@ -36,6 +36,7 @@ FILTER_FIELDS = [
     ("capacity", "Capacity"),
     ("ro_rh", "RO/RH"),
     ("plant", "Plant"),
+    ("plant_code", "Plant Code"),
 ]
 
 
@@ -85,9 +86,12 @@ class DashboardTab(ctk.CTkFrame):
         box.pack(fill="x", pady=(0, 12))
         row = ctk.CTkFrame(box, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=14)
+        # A wrapping grid, not one long row: on a laptop screen a single row
+        # would push the last filters (Plant, Plant Code) off the edge.
+        self._filter_cells = []
 
         search_holder = ctk.CTkFrame(row, fg_color="transparent")
-        search_holder.pack(side="left", padx=(0, 14))
+        self._filter_cells.append(search_holder)
         ctk.CTkLabel(
             search_holder, text="Search", font=theme.font(10),
             text_color=theme.TEXT_MUTED, anchor="w",
@@ -97,7 +101,7 @@ class DashboardTab(ctk.CTkFrame):
             "write", lambda *a: debounce(self, "_dash_search_after", 220, self.refresh)
         )
         ctk.CTkEntry(
-            search_holder, textvariable=self.search_var, width=200, height=32,
+            search_holder, textvariable=self.search_var, width=175, height=32,
             placeholder_text="Any field...",
             fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
         ).pack()
@@ -105,7 +109,7 @@ class DashboardTab(ctk.CTkFrame):
         # Fleet state is a single-choice filter and defaults to Running, so
         # the dashboard describes the fleet actually on site.
         fleet_holder = ctk.CTkFrame(row, fg_color="transparent")
-        fleet_holder.pack(side="left", padx=(0, 14))
+        self._filter_cells.append(fleet_holder)
         ctk.CTkLabel(
             fleet_holder, text="Fleet", font=theme.font(10),
             text_color=theme.TEXT_MUTED, anchor="w",
@@ -121,8 +125,25 @@ class DashboardTab(ctk.CTkFrame):
 
         for key, label in FILTER_FIELDS:
             dropdown = FilterDropdown(row, label, on_change=self.refresh, width=175)
-            dropdown.pack(side="left", padx=(0, 10))
+            self._filter_cells.append(dropdown)
             self._filters[key] = dropdown
+
+        self._filter_row = row
+        row.bind("<Configure>", lambda e: self._layout_filters(e.width))
+        self._layout_filters(0)
+
+    def _layout_filters(self, available_width):
+        """Re-flow the filter controls into as many columns as will fit."""
+        cell_width = 190
+        columns = max(1, (available_width or 1200) // cell_width)
+        if getattr(self, "_filter_columns", None) == columns:
+            return
+        self._filter_columns = columns
+        for index, widget in enumerate(self._filter_cells):
+            widget.grid(
+                row=index // columns, column=index % columns,
+                padx=(0, 12), pady=(0, 8), sticky="w",
+            )
 
     def _build_kpis(self, parent):
         strip = ctk.CTkFrame(parent, fg_color="transparent")

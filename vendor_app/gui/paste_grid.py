@@ -37,10 +37,15 @@ class PasteGrid(ctk.CTkFrame):
                 font=(theme.FONT_FAMILY, 10, "bold"), width=self.widths[index],
             ).grid(row=0, column=index + 1, sticky="nsew", padx=(0, 1), pady=(0, 1))
 
-        # One shared bindtag instead of a handler per cell.
-        self.bind_class("PasteCell", "<Key>", self._on_key)
-        self.bind_class("PasteCell", "<Control-v>", self._on_paste)
-        self.bind_class("PasteCell", "<Control-V>", self._on_paste)
+        # One bindtag for this grid's cells, instead of a handler per cell.
+        # The tag MUST be unique per instance: bind_class() registers against
+        # a class NAME application-wide, so a shared name would let the last
+        # grid constructed hijack the handlers of every other grid on screen
+        # (paste would land in the wrong table entirely).
+        self._cell_tag = f"PasteCell{id(self)}"
+        self.bind_class(self._cell_tag, "<Key>", self._on_key)
+        self.bind_class(self._cell_tag, "<Control-v>", self._on_paste)
+        self.bind_class(self._cell_tag, "<Control-V>", self._on_paste)
 
         for r in range(1, rows + 1):
             bg = theme.BG_CARD if r % 2 else theme.BG_ROW_ALT
@@ -57,7 +62,7 @@ class PasteGrid(ctk.CTkFrame):
                     font=(theme.FONT_FAMILY, 10), width=self.widths[c],
                 )
                 entry.grid(row=r, column=c + 1, sticky="nsew", padx=(0, 1), pady=(0, 1), ipady=4)
-                entry.bindtags(("PasteCell",) + entry.bindtags())
+                entry.bindtags((self._cell_tag,) + entry.bindtags())
                 entry._pos = (r - 1, c)
                 row_cells.append(entry)
             self.cells.append(row_cells)
