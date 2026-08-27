@@ -8,7 +8,9 @@ Two flows, sharing the same shape and the same one-email-per-vendor rule:
     IDs, every broken-down machine for a vendor lands in ONE email.
 
 Emails are saved as Outlook DRAFTS in their own sub-folder so the user
-reviews them before sending. The CC address is asked for once and reused.
+reviews them before sending. Each flow keeps its OWN CC row - the people
+copied on an invoice chase are rarely the people copied on a breakdown -
+asked for once and reused from then on.
 """
 
 import webbrowser
@@ -19,6 +21,9 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from vendor_app.config import (
+    CC_BREAKDOWN_KEY,
+    CC_DEFECTIVE_KEY,
+    CC_FLOW_LABELS,
     DEFECTIVE_INVOICE_KEYS,
     DEFECTIVE_INVOICE_LABELS,
     OUTLOOK_BREAKDOWN_FOLDER,
@@ -60,7 +65,9 @@ class _EmailFlow(ctk.CTkFrame):
     INPUT_TITLE = "PASTE DATA"
     INPUT_HINT = ""
     FOLDER = ""
-    EMPTY_HINT = "Paste data on the left, then click Prepare Emails."
+    EMPTY_HINT = "Paste data, then Prepare Emails."
+    # Which CC row this flow uses. Each flow has its own; they never share.
+    CC_KEY = CC_DEFECTIVE_KEY
 
     def __init__(self, master, store, settings, on_data_changed=None, **kwargs):
         super().__init__(master, fg_color="transparent")
@@ -97,18 +104,22 @@ class _EmailFlow(ctk.CTkFrame):
 
         right = ctk.CTkFrame(split, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
-        right.grid_rowconfigure(1, weight=1)
+        right.grid_rowconfigure(3, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
+        # This row is laid out with grid, NOT pack. With pack, a long status
+        # message packed to the left claims its full requested width first and
+        # the action buttons packed after it get whatever is left - which on a
+        # narrow window was nothing, pushing Preview/Create Drafts off the
+        # right edge where they could not be clicked. grid gives the buttons a
+        # column of their own that the status text cannot encroach on.
         toolbar = ctk.CTkFrame(right, fg_color="transparent")
-        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        self.status_pill = pill(
-            toolbar, self.EMPTY_HINT, fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY
-        )
-        self.status_pill.pack(side="left")
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        toolbar.grid_columnconfigure(0, weight=1)
+        toolbar.grid_columnconfigure(1, weight=0)
 
         actions = ctk.CTkFrame(toolbar, fg_color="transparent")
-        actions.pack(side="right")
+        actions.grid(row=0, column=1, sticky="e")
         secondary_button(actions, "Preview Selected", self.preview_selected, width=160).pack(
             side="left", padx=(0, 8)
         )
@@ -116,8 +127,33 @@ class _EmailFlow(ctk.CTkFrame):
             actions, "Create Outlook Drafts", self.create_drafts, width=200
         ).pack(side="left")
 
+        # This flow's own CC row, directly above its results.
+        cc_row = ctk.CTkFrame(right, fg_color="transparent")
+        cc_row.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        # Just "CC:" - the sub-tab above already says which flow this is, and
+        # spelling it out again here cost the address pill the room to show
+        # the address itself.
+        ctk.CTkLabel(
+            cc_row, text="CC:", font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 8))
+        self.cc_pill = pill(cc_row, "", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
+        self.cc_pill.pack(side="left")
+        self.cc_pill.configure(cursor="hand2")
+        self.cc_pill.bind("<Button-1>", lambda e: self.change_cc())
+        secondary_button(cc_row, "Change CC", self.change_cc, width=115).pack(
+            side="left", padx=(8, 0)
+        )
+        self._refresh_cc_pill()
+
+        # The status line gets a row to itself, so however long the message
+        # runs it can never squeeze the buttons or the CC controls.
+        self.status_pill = pill(
+            right, self.EMPTY_HINT, fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY
+        )
+        self.status_pill.grid(row=2, column=0, sticky="w", pady=(0, 8))
+
         wrap = card(right, fg_color=theme.BG_CARD)
-        wrap.grid(row=1, column=0, sticky="nsew")
+        wrap.grid(row=3, column=0, sticky="nsew")
         wrap.grid_rowconfigure(0, weight=1)
         wrap.grid_columnconfigure(0, weight=1)
         outer, self.tree = build_table(wrap, PREVIEW_COLUMNS, PREVIEW_LABELS, PREVIEW_WIDTHS)
@@ -201,6 +237,10 @@ class _EmailFlow(ctk.CTkFrame):
         extra = result.get("note")
         if extra:
             status += f"  •  {extra}"
+        # Cap the status text: it shares its row with the action buttons, and
+        # an unbounded message is what used to squeeze them off the screen.
+        if len(status) > 110:
+            status = status[:107] + "..."
         self.status_pill.configure(text=f"  {status}  ")
 
     def _render_preview(self):
@@ -228,7 +268,7 @@ class _EmailFlow(ctk.CTkFrame):
             message = next((m for m in self.messages if m["vendor_code"] == selection[0]), None)
         message = message or self.messages[0]
 
-        cc = self.settings.cc_email
+        cc = self.cc_address
         html = (
             f'<div style="font-family:Calibri,Arial,sans-serif; font-size:11pt;">'
             f'<p style="background:#eee; padding:8px; border:1px solid #ccc;">'
@@ -242,28 +282,42 @@ class _EmailFlow(ctk.CTkFrame):
             fh.write(html)
         webbrowser.open(f"file://{path}")
 
+    # ----------------------------------------------------------------- CC --
+    @property
+    def cc_address(self):
+        """This flow's CC address - never the other flow's."""
+        return self.settings.cc_for(self.CC_KEY)
+
+    def _refresh_cc_pill(self):
+        self.cc_pill.configure(text=f"  {self.cc_address or '(not set)'}  ")
+
+    def change_cc(self):
+        CCAddressDialog(
+            self, self.settings, on_saved=self._on_cc_saved,
+            cc_key=self.CC_KEY, flow_label=CC_FLOW_LABELS[self.CC_KEY],
+        )
+
+    def _on_cc_saved(self, value):
+        self._refresh_cc_pill()
+        notify(self, f"{CC_FLOW_LABELS[self.CC_KEY]} set to: {value or '(none)'}")
+
     # ------------------------------------------------------------- drafts --
     def _ensure_cc(self):
-        """Ask for the CC address exactly once, then reuse it forever."""
-        if self.settings.cc_prompted:
+        """Ask for THIS flow's CC address exactly once, then reuse it."""
+        if self.settings.cc_prompted_for(self.CC_KEY):
             return True
 
-        dialog = CCAddressDialog(self, self.settings, first_run=True)
+        dialog = CCAddressDialog(
+            self, self.settings, first_run=True,
+            cc_key=self.CC_KEY, flow_label=CC_FLOW_LABELS[self.CC_KEY],
+        )
         value = dialog.wait_for_result()
         if value is None:
-            # Cancelled: leave cc_prompted unset so we ask again next time
-            # rather than silently drafting with no CC.
+            # Cancelled: leave it unprompted so we ask again next time rather
+            # than silently drafting with no CC.
             return False
-        self._notify_cc_changed()
+        self._refresh_cc_pill()
         return True
-
-    def _notify_cc_changed(self):
-        """Keep the header pill in step when the CC is set from inside a flow."""
-        host = self.master
-        while host is not None and not hasattr(host, "_refresh_cc_pill"):
-            host = getattr(host, "master", None)
-        if host is not None:
-            host._refresh_cc_pill()
 
     def create_drafts(self):
         if not self.messages:
@@ -294,7 +348,7 @@ class _EmailFlow(ctk.CTkFrame):
 
         try:
             result = outlook.create_drafts(
-                self.messages, self.FOLDER, cc_addresses=self.settings.cc_email
+                self.messages, self.FOLDER, cc_addresses=self.cc_address
             )
         except outlook.OutlookError as exc:
             messagebox.showerror("Outlook Error", str(exc))
@@ -323,6 +377,7 @@ class DefectiveInvoiceFlow(_EmailFlow):
         "A header row is detected and skipped automatically."
     )
     FOLDER = OUTLOOK_DEFECTIVE_FOLDER
+    CC_KEY = CC_DEFECTIVE_KEY
 
     def _build_messages(self, text, skip_codes):
         rows = parse_pasted_rows(text, DEFECTIVE_INVOICE_KEYS)
@@ -344,7 +399,8 @@ class EquipmentBreakdownFlow(_EmailFlow):
         "fetched from the Equipment Master, since these identifiers are unique."
     )
     FOLDER = OUTLOOK_BREAKDOWN_FOLDER
-    INPUT_WIDTH = 560
+    CC_KEY = CC_BREAKDOWN_KEY
+    INPUT_WIDTH = 470
 
     def __init__(self, master, store, settings, equipment_store, on_data_changed=None):
         self.equipment_store = equipment_store
@@ -355,7 +411,7 @@ class EquipmentBreakdownFlow(_EmailFlow):
         self.grid = PasteGrid(
             parent,
             columns=[("identifier", "RH / Technical ID / Reg No"), ("remarks", "Remarks")],
-            widths=[22, 30],
+            widths=[20, 24],
             rows=80,
         )
         self.grid.pack(fill="both", expand=True, padx=16, pady=4)
@@ -425,19 +481,10 @@ class CommunicationTab(ctk.CTkFrame):
         ctk.CTkLabel(
             left,
             text="Draft vendor emails from pasted data - one email per vendor, saved as "
-                 "Outlook drafts for review before sending.",
+                 "Outlook drafts for review before sending. Each flow keeps its own CC row.",
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
-        cc_box = ctk.CTkFrame(header, fg_color="transparent")
-        cc_box.pack(side="right")
-        self.cc_pill = pill(cc_box, "", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
-        self.cc_pill.pack(side="left", padx=(0, 8))
-        # The pill is the thing users look at, so let them click it too.
-        self.cc_pill.configure(cursor="hand2")
-        self.cc_pill.bind("<Button-1>", lambda e: self.change_cc())
-        secondary_button(cc_box, "Change CC", self.change_cc, width=120).pack(side="left")
-        self._refresh_cc_pill()
 
         self.subtabs = ctk.CTkTabview(
             self,
@@ -470,13 +517,8 @@ class CommunicationTab(ctk.CTkFrame):
         )
         self.breakdown_flow.pack(fill="both", expand=True)
 
-    def _refresh_cc_pill(self):
-        cc = self.settings.cc_email
-        self.cc_pill.configure(text=f"  CC: {cc or '(not set)'}  ")
-
-    def change_cc(self):
-        CCAddressDialog(self, self.settings, on_saved=self._on_cc_saved)
-
-    def _on_cc_saved(self, value):
-        self._refresh_cc_pill()
-        notify(self, f"CC set to: {value or '(none)'}")
+    def refresh(self):
+        """Keep both flows' CC pills in step after a change made elsewhere."""
+        for flow in (getattr(self, "invoice_flow", None), getattr(self, "breakdown_flow", None)):
+            if flow is not None:
+                flow._refresh_cc_pill()

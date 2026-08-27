@@ -44,12 +44,26 @@ class RecordsScreen(ctk.CTkFrame):
 
     DOUBLE_CLICK_EDITS = True
 
+    # What the strip under the toolbar tells the user the grid does. Screens
+    # that open a record dialog on double-click override it.
+    GRID_HINT = (
+        "Double-click a cell to edit it in place  •  Enter commits, Esc cancels, "
+        "Tab moves on  •  Arrow keys move the selected cell  •  Ctrl+C copies"
+    )
+    RECORD_GRID_HINT = (
+        "Double-click a row to open the full record  •  Arrow keys walk the grid, "
+        "Home/End jump to the first/last column  •  Ctrl+C copies the cell or rows  •  "
+        "Enter or F2 edits the selected cell in place"
+    )
+
     def __init__(self, master, columns, headers, widths, editable_keys=(), on_data_changed=None):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.columns = columns
         self.headers = headers
         self.widths = widths
         self.editable_keys = set(editable_keys)
+        if not self.DOUBLE_CLICK_EDITS:
+            self.GRID_HINT = self.RECORD_GRID_HINT
         self.on_data_changed = on_data_changed
         self._sort_key = None
         self._sort_desc = False
@@ -122,10 +136,7 @@ class RecordsScreen(ctk.CTkFrame):
         self.extra_actions(right_actions)
 
         ctk.CTkLabel(
-            self,
-            text="Double-click a cell to edit it in place  •  Enter commits, Esc cancels, "
-                 "Tab moves on  •  Ctrl+C copies the selected cell or rows",
-            font=theme.font(10), text_color=theme.TEXT_MUTED,
+            self, text=self.GRID_HINT, font=theme.font(10), text_color=theme.TEXT_MUTED,
         ).pack(anchor="w", padx=20, pady=(0, 6))
 
         wrap = card(self, fg_color=theme.BG_CARD)

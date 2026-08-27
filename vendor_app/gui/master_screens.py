@@ -127,8 +127,12 @@ class VendorRecordsScreen(RecordsScreen):
 
 class EquipmentRecordsScreen(RecordsScreen):
     TITLE = "Equipment Records"
-    SUBTITLE = ("Running machines, directly editable. A vendor referenced here is added "
-                "to the vendor master automatically. De-mobbed records are locked.")
+    SUBTITLE = ("Double-click a row to open the full machine record. Arrow keys walk the "
+                "grid and Ctrl+C copies, as in Excel. De-mobbed records are locked.")
+    # Double-click opens the whole-record modal instead of editing one cell, so
+    # the grid stays a place to navigate and copy from. Single cells are still
+    # editable on Enter / F2 / right-click for a quick correction.
+    DOUBLE_CLICK_EDITS = False
     IMPORT_LABEL = "Import Equipment..."
     EXPORT_PREFIX = "Export All"
     paste_keys = tuple(EQUIPMENT_KEYS)
@@ -145,7 +149,13 @@ class EquipmentRecordsScreen(RecordsScreen):
         )
 
     def extra_actions(self, parent):
-        """Fleet switch: the grid shows the running fleet by default."""
+        """Fleet switch plus the record actions the double-click modal mirrors."""
+        secondary_button(parent, "Edit Record", self.edit_selected, width=130).pack(
+            side="left", padx=(0, 8)
+        )
+        secondary_button(parent, "+ Add Equipment", self.add_equipment, width=150).pack(
+            side="left", padx=(0, 8)
+        )
         holder = ctk.CTkFrame(parent, fg_color="transparent")
         holder.pack(side="left", padx=(0, 8))
         self.fleet_var = ctk.StringVar(value=FLEET_RUNNING)
@@ -214,3 +224,33 @@ class EquipmentRecordsScreen(RecordsScreen):
 
     def delete_record(self, record):
         return bool(record) and self.store.delete(record)
+
+    def on_row_double_click(self, row_id, column_key):
+        """Open the whole machine, the way double-click works on a vendor."""
+        self.open_dialog(row_id)
+
+    def open_dialog(self, row_id):
+        from vendor_app.gui.equipment_dialog import EquipmentDialog
+        record = self._rows.get(row_id)
+        if record is None:
+            return
+        EquipmentDialog(self, self.store, record, on_saved=self._after_dialog)
+
+    def edit_selected(self):
+        ids = self.table.selected_ids()
+        if not ids:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Select a Row", "Select an equipment row first, or double-click it."
+            )
+            return
+        self.open_dialog(ids[0])
+
+    def add_equipment(self):
+        from vendor_app.gui.equipment_dialog import EquipmentDialog
+        EquipmentDialog(self, self.store, record=None, on_saved=self._after_dialog)
+
+    def _after_dialog(self):
+        self.refresh()
+        if self.on_data_changed:
+            self.on_data_changed()

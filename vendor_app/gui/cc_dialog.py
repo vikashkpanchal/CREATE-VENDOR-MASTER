@@ -1,4 +1,8 @@
-"""Dialog for viewing and editing the CC address used on outgoing email.
+"""Dialog for viewing and editing the CC address used by one email flow.
+
+Each communication flow owns its own CC row, so the dialog is told which
+one it is editing (`cc_key`) and names that flow throughout - there is no
+single app-wide CC to confuse it with.
 
 customtkinter's CTkInputDialog cannot be pre-filled, so it could only ever
 ask for a brand-new value - the existing CC address was impossible to edit
@@ -37,15 +41,19 @@ def validate_cc(value: str):
 class CCAddressDialog(ctk.CTkToplevel):
     """Edit the CC address. Calls on_saved(new_value) only if it changed."""
 
-    def __init__(self, master, settings, on_saved=None, first_run: bool = False):
+    def __init__(self, master, settings, on_saved=None, first_run: bool = False,
+                 cc_key=None, flow_label=None):
         super().__init__(master)
         self.settings = settings
         self.on_saved = on_saved
         self.first_run = first_run
+        from vendor_app.config import CC_DEFECTIVE_KEY, CC_FLOW_LABELS
+        self.cc_key = cc_key or CC_DEFECTIVE_KEY
+        self.flow_label = flow_label or CC_FLOW_LABELS.get(self.cc_key, "CC")
         self.result = None
 
         self.configure(fg_color=theme.BG_SURFACE)
-        self.title("CC Address")
+        self.title(self.flow_label)
         screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
         width, height = min(620, max(460, screen_w - 120)), 330
         self.geometry(f"{width}x{height}+{max(0,(screen_w-width)//2)}+{max(0,(screen_h-height)//3)}")
@@ -74,15 +82,18 @@ class CCAddressDialog(ctk.CTkToplevel):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=20, pady=(20, 6))
         ctk.CTkLabel(
-            header, text="CC Address", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
+            header, text=self.flow_label, font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
         ctk.CTkLabel(
             header,
             text=(
-                "This address is kept in CC on every outgoing email. You are asked "
-                "once; it is saved and reused from then on."
+                f"This address is kept in CC on every {self.flow_label.lower()} email, "
+                "and on no other flow. You are asked once; it is saved and reused "
+                "from then on."
                 if self.first_run else
-                "This address is kept in CC on every outgoing email."
+                f"This address is kept in CC on every {self.flow_label.lower()} email. "
+                "Each communication flow has its own, so changing this one leaves "
+                "the other untouched."
             ),
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
             wraplength=540, justify="left",
@@ -100,7 +111,7 @@ class CCAddressDialog(ctk.CTkToplevel):
         section_label(box, "EMAIL ADDRESS").pack(anchor="w", padx=18, pady=(14, 4))
         divider(box).pack(fill="x", padx=18, pady=(0, 10))
 
-        self.value_var = ctk.StringVar(value=self.settings.cc_email)
+        self.value_var = ctk.StringVar(value=self.settings.cc_for(self.cc_key))
         self.entry = ctk.CTkEntry(
             box, textvariable=self.value_var, height=36,
             placeholder_text="name@company.com",
@@ -137,7 +148,7 @@ class CCAddressDialog(ctk.CTkToplevel):
         self._finish("")
 
     def _finish(self, value):
-        self.settings.set_cc_email(value)
+        self.settings.set_cc_for(self.cc_key, value)
         self.result = value
         try:
             self.grab_release()

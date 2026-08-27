@@ -82,15 +82,33 @@ class DashboardTab(ctk.CTkFrame):
         self._build_table(body)
 
     def _build_filters(self, parent):
+        """A filter panel that always fits, however narrow the window gets.
+
+        The controls used to be laid out in one long row, so on anything
+        smaller than a wide desktop the last of them - Plant and Plant Code -
+        ran off the right edge and could not be reached at all. They are now
+        a uniform grid that reflows: every cell is the same fixed width, and
+        the number of columns is recomputed from the panel's real width, so
+        the row simply wraps onto a second line instead of overflowing.
+        """
         box = card(parent, fg_color=theme.BG_CARD)
         box.pack(fill="x", pady=(0, 12))
+
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(12, 0))
+        ctk.CTkLabel(
+            head, text="FILTERS", font=theme.label_font(), text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+        self.filter_summary = ctk.CTkLabel(
+            head, text="", font=theme.small_font(), text_color=theme.TEXT_MUTED,
+        )
+        self.filter_summary.pack(side="left", padx=10)
+
         row = ctk.CTkFrame(box, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=14)
-        # A wrapping grid, not one long row: on a laptop screen a single row
-        # would push the last filters (Plant, Plant Code) off the edge.
+        row.pack(fill="x", padx=16, pady=(8, 14))
         self._filter_cells = []
 
-        search_holder = ctk.CTkFrame(row, fg_color="transparent")
+        search_holder = ctk.CTkFrame(row, fg_color="transparent", width=self.CELL_WIDTH)
         self._filter_cells.append(search_holder)
         ctk.CTkLabel(
             search_holder, text="Search", font=theme.font(10),
@@ -101,14 +119,14 @@ class DashboardTab(ctk.CTkFrame):
             "write", lambda *a: debounce(self, "_dash_search_after", 220, self.refresh)
         )
         ctk.CTkEntry(
-            search_holder, textvariable=self.search_var, width=175, height=32,
+            search_holder, textvariable=self.search_var, width=self.CONTROL_WIDTH, height=32,
             placeholder_text="Any field...",
             fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
-        ).pack()
+        ).pack(anchor="w")
 
         # Fleet state is a single-choice filter and defaults to Running, so
         # the dashboard describes the fleet actually on site.
-        fleet_holder = ctk.CTkFrame(row, fg_color="transparent")
+        fleet_holder = ctk.CTkFrame(row, fg_color="transparent", width=self.CELL_WIDTH)
         self._filter_cells.append(fleet_holder)
         ctk.CTkLabel(
             fleet_holder, text="Fleet", font=theme.font(10),
@@ -117,33 +135,61 @@ class DashboardTab(ctk.CTkFrame):
         self.fleet_var = ctk.StringVar(value=FLEET_RUNNING)
         ctk.CTkOptionMenu(
             fleet_holder, variable=self.fleet_var, values=FLEET_FILTER_VALUES,
-            command=lambda *_: self.refresh(), width=175, height=32,
+            command=lambda *_: self.refresh(), width=self.CONTROL_WIDTH, height=32,
             fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
             button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
             font=theme.small_font(),
-        ).pack()
+        ).pack(anchor="w")
 
         for key, label in FILTER_FIELDS:
-            dropdown = FilterDropdown(row, label, on_change=self.refresh, width=175)
+            dropdown = FilterDropdown(
+                row, label, on_change=self.refresh, width=self.CONTROL_WIDTH
+            )
             self._filter_cells.append(dropdown)
             self._filters[key] = dropdown
 
         self._filter_row = row
-        row.bind("<Configure>", lambda e: self._layout_filters(e.width))
-        self._layout_filters(0)
+        self._filter_columns = None
+        # Measure the CARD, not the inner row: the row's own width is a
+        # consequence of the layout we are about to choose, so reading it
+        # here is how the panel used to oscillate between column counts.
+        box.bind("<Configure>", self._on_filter_resize)
+        self.after(60, lambda: self._layout_filters(box.winfo_width()))
+
+    # Every filter cell is the same size, which is what stops the panel from
+    # looking scattered: controls line up in real columns, not wherever their
+    # own natural width happens to end.
+    CONTROL_WIDTH = 175
+    CELL_WIDTH = 195
+
+    def _on_filter_resize(self, event):
+        self._layout_filters(event.width)
 
     def _layout_filters(self, available_width):
-        """Re-flow the filter controls into as many columns as will fit."""
-        cell_width = 190
-        columns = max(1, (available_width or 1200) // cell_width)
-        if getattr(self, "_filter_columns", None) == columns:
+        """Re-flow the filter controls into as many equal columns as fit."""
+        usable = max(0, (available_width or 0) - 32)      # the card's padx
+        if usable < self.CELL_WIDTH:
+            # Too early to measure, or genuinely tiny - one column is always
+            # reachable, which is the point: nothing is ever off-screen.
+            columns = 1 if usable else len(self._filter_cells)
+        else:
+            columns = max(1, min(len(self._filter_cells), usable // self.CELL_WIDTH))
+        if self._filter_columns == columns:
             return
         self._filter_columns = columns
+
         for index, widget in enumerate(self._filter_cells):
             widget.grid(
                 row=index // columns, column=index % columns,
-                padx=(0, 12), pady=(0, 8), sticky="w",
+                padx=(0, 16), pady=(0, 10), sticky="w",
             )
+        for column in range(columns):
+            self._filter_row.grid_columnconfigure(
+                column, weight=0, minsize=self.CELL_WIDTH, uniform="filter"
+            )
+        # A trailing weighted column soaks up the slack, so a part-full last
+        # row stays left-aligned under the row above it instead of spreading.
+        self._filter_row.grid_columnconfigure(columns, weight=1, minsize=0)
 
     def _build_kpis(self, parent):
         strip = ctk.CTkFrame(parent, fg_color="transparent")
@@ -277,6 +323,7 @@ class DashboardTab(ctk.CTkFrame):
         if not hasattr(self, "table"):
             return
         self._refresh_filter_options()
+        self._refresh_filter_summary()
         records = self._apply_filters()
         self.filtered = records
 
@@ -313,6 +360,18 @@ class DashboardTab(ctk.CTkFrame):
         self.table_count.configure(
             text=f"showing {shown:,} of {len(records):,}"
             + ("  •  export for the full set" if len(records) > shown else "")
+        )
+
+    def _refresh_filter_summary(self):
+        active = [
+            label for (key, label) in FILTER_FIELDS
+            if self._filters[key].selected
+        ]
+        if self.search_var.get().strip():
+            active.insert(0, "Search")
+        self.filter_summary.configure(
+            text=("Active: " + ", ".join(active)) if active
+            else "No filters applied - showing the whole fleet"
         )
 
     def _fleet_kpi_label(self):

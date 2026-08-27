@@ -113,3 +113,44 @@ def export_equipment_to_excel(records: list, path: str) -> str:
         df.to_excel(writer, index=False, sheet_name="Equipment Master")
         _style_worksheet(writer.sheets["Equipment Master"], columns)
     return path
+
+
+def _export_simple(records: list, path: str, columns_keys, labels, sheet_name) -> str:
+    """Shared writer for the ARC/FO/line-item sheets: Sr. No. then one column
+    per key, in the order the grid shows them."""
+    columns = ["Sr. No."] + [labels[k] for k in columns_keys]
+    rows = []
+    for i, record in enumerate(records, start=1):
+        row = {"Sr. No.": i}
+        for key in columns_keys:
+            row[labels[key]] = record.get(key, "")
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=columns)
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        _style_worksheet(writer.sheets[sheet_name], columns)
+    return path
+
+
+def export_arcs_to_excel(records: list, path: str) -> str:
+    """ARC master, including the derived FO count and aggregated ARC value."""
+    from vendor_app.config import ARC_DERIVED_LABELS, ARC_DISPLAY_COLUMNS, ARC_LABELS
+
+    labels = dict(ARC_LABELS)
+    labels.update(ARC_DERIVED_LABELS)
+    return _export_simple(records, path, ARC_DISPLAY_COLUMNS, labels, "ARC Master")
+
+
+def export_fos_to_excel(records: list, path: str) -> str:
+    from vendor_app.config import FO_DERIVED_LABELS, FO_DISPLAY_COLUMNS, FO_LABELS
+
+    labels = dict(FO_LABELS)
+    labels.update(FO_DERIVED_LABELS)
+    return _export_simple(records, path, FO_DISPLAY_COLUMNS, labels, "FO Master")
+
+
+def export_arc_lines_to_excel(records: list, path: str) -> str:
+    from vendor_app.config import ARC_LINE_KEYS, ARC_LINE_LABELS
+
+    return _export_simple(records, path, ARC_LINE_KEYS, ARC_LINE_LABELS, "ARC Line Items")

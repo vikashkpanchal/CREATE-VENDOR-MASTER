@@ -1,9 +1,9 @@
-# Vendor Master Management System
+# P&M Master Management System
 
 A pure-Python desktop application for creating, importing, searching and
-maintaining a vendor master dataset, with SAP/Oracle-style vendor
-lifecycle management, a full audit trail, an equipment (rental/hire)
-master, Outlook email drafting, and clean Excel export.
+maintaining the plant & machinery masters: vendors, equipment, and the
+rate contracts behind them. SAP/Oracle-style lifecycle management, a full
+audit trail on every master, Outlook email drafting, and clean Excel export.
 
 - **UI:** `customtkinter` (dark theme) with a consistent design system —
   branded header, cobalt accent, card layout, stat tiles, wrapped
@@ -73,7 +73,7 @@ grid/export layout never changes:
 
 ## Navigation
 
-The application is three things, and the top bar says exactly that. Everything
+The application is four things, and the top bar says exactly that. Everything
 else is a sub-tab inside one of them, so the top level never grows past what
 you can scan in a glance:
 
@@ -81,6 +81,7 @@ you can scan in a glance:
 |-----|----------|
 | **Vendor Master** | Records · Search · Change Log |
 | **Equipment Master** | Records · Search · De-mob Equipment · Dashboard · Change Log |
+| **ARC & FO Master** | Structure · ARC Records · FO Records · Line Items · Change Log |
 | **Communication** | Defective Invoice · Equipment Breakdown |
 
 Every tab and sub-tab is built on first visit, so start-up stays fast.
@@ -89,16 +90,19 @@ Every tab and sub-tab is built on first visit, so start-up stays fast.
 
 Both masters share the same screen design, and both behave the same way.
 
-- **Two ways to edit.** In the **vendor master**, double-clicking a row opens
-  the full record dialog. To change a single cell in either master, select it
-  and press `Enter` (or `F2`, or right-click → Edit cell): an editor opens over
-  the cell, `Enter` commits, `Esc` cancels, `Tab` moves on. In the equipment
-  master double-click edits the cell directly. Every commit goes through the
-  store, so the same validation applies as anywhere else and a rejected value
-  is restored with the reason shown.
-- **Copy out to Excel.** `Ctrl+C` copies the highlighted cell, or the whole
-  selected block of rows as TSV, so it pastes into Excel as real cells.
-  Right-click for Copy cell / Copy row(s) / Copy row(s) with headers.
+- **Two ways to edit, the same in every master.** Double-clicking a row opens
+  the **full record dialog** - the whole vendor, machine, ARC or FO in one
+  place. To change a single cell instead, select it and press `Enter` (or
+  `F2`, or right-click → Edit cell): an editor opens over the cell, `Enter`
+  commits, `Esc` cancels, `Tab` moves on. Every commit goes through the store,
+  so the same validation applies as anywhere else and a rejected value is
+  restored with the reason shown.
+- **Excel-like navigation and copy.** The grids are for reading and copying
+  from, so a single click never starts an edit. Arrow keys walk the selected
+  cell around, `Home`/`End` jump to the first/last column and `Ctrl+Home`/
+  `Ctrl+End` to the first/last row. `Ctrl+C` copies the highlighted cell, or
+  the whole selected block of rows as TSV, so it pastes into Excel as real
+  cells. Right-click for Copy cell / Copy row(s) / Copy row(s) with headers.
 - **Unlimited import.** "Import..." reads an `.xlsx`/`.xls`/`.csv`/`.tsv` of
   any size, and **"Paste Rows" opens an Excel-like grid** - one column per
   field, so you click the first cell you need and `Ctrl+V` a block straight
@@ -156,6 +160,10 @@ An interactive analytics view over the fleet. It opens on **Running
 Equipment**; the Fleet filter switches to de-mobbed machines or to
 everything.
 
+The filter panel is a uniform grid that **reflows to the window width** -
+narrow the app and the filters wrap onto another line rather than running off
+the right edge, so every one of them stays reachable.
+
 The dimension filters (**vendor, equipment, capacity, RO/RH, plant, plant
 code**) behave
 like Excel's column filters: **multi-select** with checkboxes, a search box
@@ -171,6 +179,39 @@ recompute from the same filtered set.
   bars with hover detail
 - **RO vs RH** composition, and top capacities
 - "Export Filtered (.xlsx)" writes exactly what the filters currently select
+
+## ARC & FO Master
+
+The contract layer beneath the equipment. Three levels, and value only ever
+flows **up** the tree:
+
+```
+ARC  (ARC No)           the master agreement - the key every amendment is filed against
+ +-- FO  (FO No)        a sub-part of the ARC; one ARC carries many FOs
+      +-- Line item     the reference rows an FO's value is made of
+```
+
+- **ARC is the master key.** Every FO names exactly one ARC, and every change
+  anywhere in the hierarchy - to a contract, an order or a line - is recorded
+  in one change log against its **ARC No**, which is what makes the ARC the
+  single place an amendment history lives.
+- **The ARC's value is never typed in.** A line's value is the figure entered,
+  or `Quantity x Rate` when that is blank. An FO's total is the sum of its
+  line items - or, while it has none, its own entered figure. And the **ARC's
+  value is the aggregate of the FOs beneath it**. Those columns are shown
+  read-only in the grids and as a read-out in the dialogs, so a contract value
+  can never disagree with the orders it is supposed to summarise.
+- **Structure** shows the whole tree with each parent's total, so any ARC
+  figure can be traced down to the references behind it. Double-click an ARC
+  or FO row there to open its record.
+- **ARC Records / FO Records / Line Items** are the flat grids, with the same
+  search, unlimited import, Excel-like paste, in-place editing and export as
+  every other master.
+- An FO whose ARC No matches no contract is **not dropped** - it is grouped
+  under "(no ARC on file)" and counted on its own KPI tile, so a typo stays
+  visible instead of silently disappearing.
+- Deleting an ARC removes the FOs and line items beneath it; deleting an FO
+  removes its lines. Both are recorded in the log.
 
 ## Communication
 
@@ -193,9 +234,15 @@ Recipient addresses come from the vendor master. If a vendor has no email on
 file, a dialog lists those vendors so you can enter an address (saved back to
 the vendor master and logged) or tick **Skip**.
 
-The **CC address** is asked for once and reused. Change it via "Change CC" or
-by clicking the CC pill: the dialog opens pre-filled so you can edit it in
-place, validates before saving, and has a separate "Clear CC".
+**Each flow keeps its own CC row.** The people copied on an invoice chase are
+rarely the people copied on a breakdown, so the Defective Invoice and
+Equipment Breakdown panels each carry their own CC address, shown and edited
+on that panel. Each is asked for once, on first use of that flow, and reused
+from then on; changing one leaves the other untouched. Change either via its
+"Change CC" button or by clicking its CC pill: the dialog opens pre-filled so
+you can edit it in place, validates before saving, and has a separate
+"Clear CC". An address saved by an earlier single-CC build is carried across
+to both rows on first run, so nothing is lost and you are not asked again.
 
 "Preview Selected" opens the exact email in your browser before any draft is
 created. Email tables use a thick outer border, bold header row and
@@ -237,10 +284,11 @@ vendor_app/
                                delete, search - wired to the change log
   audit.py                    ChangeLog: append-only history for both masters
   equipment.py                EquipmentStore: equipment master, lookups, de-mob
+  arc.py                      ArcStore: ARC -> FO -> line items, with value roll-up
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
   outlook.py                  Outlook draft creation (Windows/pywin32)
-  settings.py                 persisted preferences (CC address)
+  settings.py                 persisted preferences (per-flow CC addresses)
   importer.py                 mass-import: parse rows from a file
   export.py                   .xlsx export (vendors, equipment, change logs)
   gui/
@@ -263,11 +311,15 @@ vendor_app/
     master_tab.py                  vendor master directory + stat strip
     equipment_tab.py               equipment search
     demob_tab.py                   bulk de-mob + de-mobbed equipment list
+    equipment_dialog.py            full machine record modal
+    arc_screens.py                 ARC / FO / line-item records screens
+    arc_structure_tab.py           the ARC -> FO -> line hierarchy view
+    arc_dialogs.py                 full ARC and FO record modals
     dashboard_tab.py               interactive equipment analytics
     audit_tab.py                   change log screen (serves both masters)
     communication_tab.py           the two email flows
     edit_dialog.py                 shared add/edit record + status dialog
-    cc_dialog.py                   editable, pre-filled CC address dialog
+    cc_dialog.py                   editable, pre-filled per-flow CC address dialog
     missing_email_dialog.py        collect absent vendor emails
-data/                         local CSV stores, both change logs, settings (git-ignored)
+data/                         local CSV stores, all three change logs, settings (git-ignored)
 ```

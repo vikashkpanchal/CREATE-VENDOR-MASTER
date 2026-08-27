@@ -2,7 +2,7 @@
 
 import os
 
-APP_TITLE = "Vendor Master Management System"
+APP_TITLE = "P&M Master Management System"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -369,3 +369,268 @@ BREAKDOWN_EMAIL_HEADERS = {
 # Outlook draft folders (created under the default account's Inbox if absent).
 OUTLOOK_DEFECTIVE_FOLDER = "Defective Invoice"
 OUTLOOK_BREAKDOWN_FOLDER = "Equipment Breakdown"
+
+# ======================================================= ARC & FO master ==
+# An ARC (Annual Rate Contract) is the master agreement and the key every
+# amendment is filed against. FOs (Framework Orders) are its sub-parts: one
+# ARC can carry many FOs, and the ARC's total value is the aggregate of the
+# FO values beneath it - never a number typed in on its own. Line items sit
+# one level further down and act as the references behind an FO's value.
+#
+#     ARC  (arc_no)              master key, holds the amendments
+#      +-- FO  (fo_no)           sub-part, many per ARC
+#           +-- Line item        reference rows behind the FO's value
+#
+ARC_FILE = os.path.join(DATA_DIR, "arc_master.csv")
+FO_FILE = os.path.join(DATA_DIR, "fo_master.csv")
+ARC_LINE_ITEM_FILE = os.path.join(DATA_DIR, "arc_line_items.csv")
+ARC_AUDIT_FILE = os.path.join(DATA_DIR, "arc_audit_log.csv")
+
+# --- ARC (the master) ------------------------------------------------------
+ARC_KEYS = [
+    "arc_no",
+    "arc_description",
+    "vendor_code",
+    "vendor_name",
+    "arc_start_date",
+    "arc_end_date",
+    "amendment_no",
+    "amendment_date",
+    "plant",
+    "status",
+    "remarks",
+]
+
+ARC_LABELS = {
+    "arc_no": "ARC No",
+    "arc_description": "ARC Description",
+    "vendor_code": "Vendor Code",
+    "vendor_name": "Vendor Name",
+    "arc_start_date": "ARC Start Date",
+    "arc_end_date": "ARC End Date",
+    "amendment_no": "Amendment No",
+    "amendment_date": "Amendment Date",
+    "plant": "Plant",
+    "status": "Status",
+    "remarks": "Remarks",
+}
+
+# Columns the ARC grid derives rather than stores: they roll up from the FOs.
+ARC_DERIVED_KEYS = ["fo_count", "arc_value"]
+
+ARC_DERIVED_LABELS = {
+    "fo_count": "FOs",
+    "arc_value": "ARC Value (FO Total)",
+}
+
+ARC_DISPLAY_COLUMNS = ARC_KEYS[:4] + ARC_DERIVED_KEYS + ARC_KEYS[4:]
+
+ARC_WRAPPED_LABELS = {
+    "sr_no": "Sr.\nNo.",
+    "arc_no": "ARC\nNo",
+    "arc_description": "ARC\nDescription",
+    "vendor_code": "Vendor\nCode",
+    "vendor_name": "Vendor\nName",
+    "fo_count": "FOs",
+    "arc_value": "ARC Value\n(FO Total)",
+    "arc_start_date": "ARC Start\nDate",
+    "arc_end_date": "ARC End\nDate",
+    "amendment_no": "Amendment\nNo",
+    "amendment_date": "Amendment\nDate",
+    "plant": "Plant",
+    "status": "Status",
+    "remarks": "Remarks",
+}
+
+ARC_COLUMN_WIDTHS = {
+    "sr_no": 64,
+    "arc_no": 150,
+    "arc_description": 280,
+    "vendor_code": 110,
+    "vendor_name": 240,
+    "fo_count": 70,
+    "arc_value": 150,
+    "arc_start_date": 120,
+    "arc_end_date": 120,
+    "amendment_no": 120,
+    "amendment_date": 130,
+    "plant": 120,
+    "status": 110,
+    "remarks": 260,
+}
+
+ARC_STATUS_VALUES = ["Active", "Amended", "Expired", "Closed"]
+ARC_STATUS_DEFAULT = "Active"
+
+# --- FO (the sub-part) -----------------------------------------------------
+FO_KEYS = [
+    "fo_no",
+    "arc_no",
+    "fo_description",
+    "vendor_code",
+    "vendor_name",
+    "fo_date",
+    "validity_end_date",
+    "plant",
+    "fo_value",
+    "status",
+    "remarks",
+]
+
+FO_LABELS = {
+    "fo_no": "FO No",
+    "arc_no": "ARC No",
+    "fo_description": "FO Description",
+    "vendor_code": "Vendor Code",
+    "vendor_name": "Vendor Name",
+    "fo_date": "FO Date",
+    "validity_end_date": "Validity End Date",
+    "plant": "Plant",
+    "fo_value": "FO Value",
+    "status": "Status",
+    "remarks": "Remarks",
+}
+
+# An FO's effective value comes from its line items when it has any, so the
+# grid shows both the entered figure and the rolled-up one.
+FO_DERIVED_KEYS = ["line_count", "fo_total"]
+
+FO_DERIVED_LABELS = {
+    "line_count": "Line Items",
+    "fo_total": "FO Total (Effective)",
+}
+
+FO_DISPLAY_COLUMNS = FO_KEYS[:9] + FO_DERIVED_KEYS + FO_KEYS[9:]
+
+FO_WRAPPED_LABELS = {
+    "sr_no": "Sr.\nNo.",
+    "fo_no": "FO\nNo",
+    "arc_no": "ARC\nNo",
+    "fo_description": "FO\nDescription",
+    "vendor_code": "Vendor\nCode",
+    "vendor_name": "Vendor\nName",
+    "fo_date": "FO\nDate",
+    "validity_end_date": "Validity\nEnd Date",
+    "plant": "Plant",
+    "fo_value": "FO Value\n(Entered)",
+    "line_count": "Line\nItems",
+    "fo_total": "FO Total\n(Effective)",
+    "status": "Status",
+    "remarks": "Remarks",
+}
+
+FO_COLUMN_WIDTHS = {
+    "sr_no": 64,
+    "fo_no": 150,
+    "arc_no": 150,
+    "fo_description": 260,
+    "vendor_code": 110,
+    "vendor_name": 240,
+    "fo_date": 120,
+    "validity_end_date": 130,
+    "plant": 120,
+    "fo_value": 130,
+    "line_count": 90,
+    "fo_total": 150,
+    "status": 110,
+    "remarks": 240,
+}
+
+FO_STATUS_VALUES = ["Open", "Partially Executed", "Executed", "Closed"]
+FO_STATUS_DEFAULT = "Open"
+
+# --- Line items (the references) ------------------------------------------
+ARC_LINE_KEYS = [
+    "arc_no",
+    "fo_no",
+    "line_no",
+    "item_code",
+    "item_description",
+    "uom",
+    "quantity",
+    "rate",
+    "line_value",
+    "reference",
+    "remarks",
+]
+
+ARC_LINE_LABELS = {
+    "arc_no": "ARC No",
+    "fo_no": "FO No",
+    "line_no": "Line No",
+    "item_code": "Item Code",
+    "item_description": "Item Description",
+    "uom": "UOM",
+    "quantity": "Quantity",
+    "rate": "Rate",
+    "line_value": "Line Value",
+    "reference": "Reference",
+    "remarks": "Remarks",
+}
+
+ARC_LINE_WRAPPED_LABELS = {
+    "sr_no": "Sr.\nNo.",
+    "arc_no": "ARC\nNo",
+    "fo_no": "FO\nNo",
+    "line_no": "Line\nNo",
+    "item_code": "Item\nCode",
+    "item_description": "Item\nDescription",
+    "uom": "UOM",
+    "quantity": "Quantity",
+    "rate": "Rate",
+    "line_value": "Line\nValue",
+    "reference": "Reference",
+    "remarks": "Remarks",
+}
+
+ARC_LINE_COLUMN_WIDTHS = {
+    "sr_no": 64,
+    "arc_no": 150,
+    "fo_no": 150,
+    "line_no": 80,
+    "item_code": 130,
+    "item_description": 300,
+    "uom": 90,
+    "quantity": 110,
+    "rate": 120,
+    "line_value": 130,
+    "reference": 180,
+    "remarks": 240,
+}
+
+# Fields carrying money/quantity, parsed leniently (commas and currency
+# symbols are tolerated) so a figure pasted straight out of Excel still adds up.
+ARC_NUMERIC_FIELDS = {"quantity", "rate", "line_value", "fo_value"}
+
+# The ARC master keeps its own change log, keyed by ARC No - which is exactly
+# what makes the ARC the master key for every amendment beneath it.
+ARC_AUDIT_COLUMNS = ["timestamp", "arc_no", "reference", "action", "details", "actor"]
+
+ARC_AUDIT_WRAPPED_LABELS = {
+    "timestamp": "Date &\nTime",
+    "arc_no": "ARC\nNo",
+    "reference": "FO / Line\nReference",
+    "action": "Action",
+    "details": "Details",
+    "actor": "Changed\nBy",
+}
+
+ARC_AUDIT_COLUMN_WIDTHS = {
+    "timestamp": 150,
+    "arc_no": 140,
+    "reference": 190,
+    "action": 130,
+    "details": 420,
+    "actor": 120,
+}
+
+# --------------------------------------------------- per-flow CC addresses --
+# Each communication flow keeps its OWN CC row: the people copied on a
+# defective-invoice chase are rarely the people copied on a breakdown.
+CC_DEFECTIVE_KEY = "cc_email_defective"
+CC_BREAKDOWN_KEY = "cc_email_breakdown"
+
+CC_FLOW_LABELS = {
+    CC_DEFECTIVE_KEY: "Defective Invoice CC",
+    CC_BREAKDOWN_KEY: "Equipment Breakdown CC",
+}

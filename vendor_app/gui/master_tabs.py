@@ -1,7 +1,8 @@
-"""The two master-data top-level tabs, each with its own sub-tabs.
+"""The master-data top-level tabs, each with its own sub-tabs.
 
-Vendor Master     : Records | Search | Change Log
-Equipment Master  : Records | Search | Dashboard | Change Log
+Vendor Master      : Records | Search | Change Log
+Equipment Master   : Records | Search | De-mob | Dashboard | Change Log
+ARC & FO Master    : Structure | ARC Records | FO Records | Line Items | Change Log
 
 Sub-tabs are built lazily on first visit - each carries a table or chart
 canvas most sessions never open.
@@ -117,5 +118,47 @@ class EquipmentMasterTab(_SubTabHost):
                 title="Equipment Change Log",
                 subtitle="Every add, edit and delete made to the equipment master, "
                          "including vendors it auto-created.",
+            ),
+        })
+
+
+class ArcMasterTab(_SubTabHost):
+    """ARC & FO Master: Structure | ARC Records | FO Records | Line Items | Change Log.
+
+    Structure comes first deliberately - the hierarchy is what the module is
+    about, and the flat grids are the way to bulk-edit what it shows.
+    """
+
+    def __init__(self, master, arc_store, change_log, on_data_changed=None):
+        from vendor_app.config import (
+            ARC_AUDIT_COLUMNS, ARC_AUDIT_COLUMN_WIDTHS, ARC_AUDIT_WRAPPED_LABELS,
+        )
+        from vendor_app.gui.audit_tab import AuditLogTab
+        from vendor_app.gui.arc_screens import (
+            ArcLineItemsScreen, ArcRecordsScreen, FoRecordsScreen,
+        )
+        from vendor_app.gui.arc_structure_tab import ArcStructureTab
+
+        self.store = arc_store
+        self.change_log = change_log
+        super().__init__(master, {
+            "Structure": lambda parent: ArcStructureTab(parent, arc_store),
+            "ARC Records": lambda parent: ArcRecordsScreen(
+                parent, arc_store, on_data_changed=on_data_changed
+            ),
+            "FO Records": lambda parent: FoRecordsScreen(
+                parent, arc_store, on_data_changed=on_data_changed
+            ),
+            "Line Items": lambda parent: ArcLineItemsScreen(
+                parent, arc_store, on_data_changed=on_data_changed
+            ),
+            "Change Log": lambda parent: AuditLogTab(
+                parent, change_log,
+                columns=ARC_AUDIT_COLUMNS,
+                headers=ARC_AUDIT_WRAPPED_LABELS,
+                widths=ARC_AUDIT_COLUMN_WIDTHS,
+                title="ARC & FO Change Log",
+                subtitle="Every amendment, add, edit and delete across ARCs, FOs and "
+                         "line items - all filed against the ARC No.",
             ),
         })

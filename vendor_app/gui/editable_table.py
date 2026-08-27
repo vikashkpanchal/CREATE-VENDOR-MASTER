@@ -8,7 +8,9 @@ no concept of:
     commits and steps to the next cell. Commits are handed to a callback so
     the store can validate them and write a change-log entry; a rejected
     edit puts the old value back and shows why.
-  * **Cell selection and copy** - the active cell is outlined, and Ctrl+C
+  * **Cell selection and copy** - the active cell is outlined, the arrow
+    keys walk it around the grid the way they do in Excel (Home/End jump to
+    the first/last column, Ctrl+Home/End to the first/last row), and Ctrl+C
     copies either that one cell or the whole selected block as TSV, so it
     pastes straight into Excel. A right-click menu offers the same.
 """
@@ -118,9 +120,20 @@ class EditableTable(tk.Frame):
         self.tree.bind("<Leave>", self._on_leave)
         self.tree.bind("<Configure>", lambda e: self._place_marker())
         self.tree.bind("<<TreeviewSelect>>", lambda e: self._place_marker())
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<Up>", "<Down>",
-                    "<Left>", "<Right>", "<Prior>", "<Next>"):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<Prior>", "<Next>"):
             self.tree.bind(seq, lambda e: self._cancel_edit(), add="+")
+
+        # Arrow keys move the ACTIVE CELL, not just the selected row, so the
+        # grid reads like a spreadsheet: walk to a cell, Ctrl+C it, carry on.
+        # These return "break" to stop Treeview's own row-only handling.
+        self.tree.bind("<Left>", lambda e: self._move(0, -1))
+        self.tree.bind("<Right>", lambda e: self._move(0, 1))
+        self.tree.bind("<Up>", lambda e: self._move(-1, 0))
+        self.tree.bind("<Down>", lambda e: self._move(1, 0))
+        self.tree.bind("<Home>", lambda e: self._move_edge(column="first"))
+        self.tree.bind("<End>", lambda e: self._move_edge(column="last"))
+        self.tree.bind("<Control-Home>", lambda e: self._move_edge(row="first", column="first"))
+        self.tree.bind("<Control-End>", lambda e: self._move_edge(row="last", column="last"))
 
     def _build_menu(self):
         self.menu = tk.Menu(self, tearoff=0, bg=theme.BG_CARD_ALT, fg=theme.TEXT_PRIMARY,
@@ -212,6 +225,56 @@ class EditableTable(tk.Frame):
         if 0 <= index < len(self.columns):
             return self.columns[index]
         return None
+
+    # -------------------------------------------------------- navigation --
+    def _rows(self):
+        return list(self.tree.get_children())
+
+    def _set_active(self, row_id, column_key):
+        self._active = (row_id, column_key)
+        self.tree.selection_set(row_id)
+        self.tree.focus(row_id)
+        self.tree.see(row_id)
+        self._place_marker()
+        return "break"
+
+    def _move(self, row_step, column_step):
+        """Walk the active cell one step, Excel-style."""
+        self._cancel_edit()
+        rows = self._rows()
+        if not rows:
+            return "break"
+        if not self._active or not self.tree.exists(self._active[0]):
+            return self._set_active(rows[0], self.columns[0])
+
+        row_id, column_key = self._active
+        if row_step:
+            index = rows.index(row_id) if row_id in rows else 0
+            row_id = rows[max(0, min(len(rows) - 1, index + row_step))]
+        if column_step:
+            index = self.columns.index(column_key) if column_key in self.columns else 0
+            column_key = self.columns[
+                max(0, min(len(self.columns) - 1, index + column_step))
+            ]
+        return self._set_active(row_id, column_key)
+
+    def _move_edge(self, row=None, column=None):
+        self._cancel_edit()
+        rows = self._rows()
+        if not rows:
+            return "break"
+        current_row = self._active[0] if self._active and self.tree.exists(self._active[0]) \
+            else rows[0]
+        current_column = self._active[1] if self._active else self.columns[0]
+        if row == "first":
+            current_row = rows[0]
+        elif row == "last":
+            current_row = rows[-1]
+        if column == "first":
+            current_column = self.columns[0]
+        elif column == "last":
+            current_column = self.columns[-1]
+        return self._set_active(current_row, current_column)
 
     # ---------------------------------------------------------- cell mark --
     def _place_marker(self):

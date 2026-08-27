@@ -1,12 +1,13 @@
-"""Top-level application window: branded header + three top-level tabs.
+"""Top-level application window: branded header + the top-level tabs.
 
-The whole application is three things, and the navigation now says so:
+The whole application is four things, and the navigation says so:
 
     Vendor Master     Records | Search | Change Log
-    Equipment Master  Records | Search | Dashboard | Change Log
+    Equipment Master  Records | Search | De-mob | Dashboard | Change Log
+    ARC & FO Master   Structure | ARC Records | FO Records | Line Items | Change Log
     Communication     Defective Invoice | Equipment Breakdown
 
-Everything else is a sub-tab inside one of those three, so the top bar
+Everything else is a sub-tab inside one of those four, so the top bar
 never grows past what a person can scan in one glance. Each top tab (and
 each sub-tab inside it) is built lazily on first visit, so start-up stays
 fast no matter how much the app grows.
@@ -14,9 +15,11 @@ fast no matter how much the app grows.
 
 import customtkinter as ctk
 
+from vendor_app.arc import ArcStore
 from vendor_app.audit import AuditLog, ChangeLog
 from vendor_app.config import (
-    APP_TITLE, AUDIT_FILE, EQUIPMENT_AUDIT_COLUMNS, EQUIPMENT_AUDIT_FILE, EQUIPMENT_FILE,
+    APP_TITLE, ARC_AUDIT_COLUMNS, ARC_AUDIT_FILE, AUDIT_FILE, EQUIPMENT_AUDIT_COLUMNS,
+    EQUIPMENT_AUDIT_FILE, EQUIPMENT_FILE,
 )
 from vendor_app.data_manager import VendorStore
 from vendor_app.equipment import EquipmentStore
@@ -28,6 +31,7 @@ ctk.set_default_color_theme("blue")
 
 VENDOR_TAB = "Vendor Master"
 EQUIPMENT_TAB = "Equipment Master"
+ARC_TAB = "ARC & FO Master"
 COMMUNICATION_TAB = "Communication"
 
 
@@ -48,6 +52,12 @@ class MainWindow(ctk.CTk):
         # master automatically (code + name).
         self.equipment_store = EquipmentStore(
             EQUIPMENT_FILE, change_log=self.equipment_log, vendor_store=self.store
+        )
+        self.arc_log = ChangeLog(ARC_AUDIT_FILE, ARC_AUDIT_COLUMNS)
+        # ARCs and FOs name vendors too, so the ARC store seeds the vendor
+        # master exactly the way the equipment store does.
+        self.arc_store = ArcStore(
+            change_log=self.arc_log, vendor_store=self.store
         )
         self.settings = AppSettings()
 
@@ -71,9 +81,10 @@ class MainWindow(ctk.CTk):
         self.tabview.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
         self._panes = {name: self.tabview.add(name)
-                       for name in (VENDOR_TAB, EQUIPMENT_TAB, COMMUNICATION_TAB)}
+                       for name in (VENDOR_TAB, EQUIPMENT_TAB, ARC_TAB, COMMUNICATION_TAB)}
         self.vendor_tab = None
         self.equipment_tab = None
+        self.arc_tab = None
         self.communication_tab = None
 
         self.tabview.configure(command=self._on_tab_changed)
@@ -102,6 +113,14 @@ class MainWindow(ctk.CTk):
             )
             self.equipment_tab.pack(fill="both", expand=True)
 
+        elif name == ARC_TAB and self.arc_tab is None:
+            from vendor_app.gui.master_tabs import ArcMasterTab
+            self.arc_tab = ArcMasterTab(
+                self._panes[name], self.arc_store, self.arc_log,
+                on_data_changed=self.refresh_all,
+            )
+            self.arc_tab.pack(fill="both", expand=True)
+
         elif name == COMMUNICATION_TAB and self.communication_tab is None:
             from vendor_app.gui.communication_tab import CommunicationTab
             self.communication_tab = CommunicationTab(
@@ -124,18 +143,18 @@ class MainWindow(ctk.CTk):
         content.pack(fill="both", expand=True, padx=24)
 
         ctk.CTkLabel(
-            content, text="VM", width=36, height=36, corner_radius=8,
+            content, text="P&M", width=48, height=36, corner_radius=8,
             fg_color=theme.ACCENT, text_color=theme.TEXT_ON_ACCENT, font=theme.font(13, "bold"),
         ).pack(side="left", pady=14)
 
         title_col = ctk.CTkFrame(content, fg_color="transparent")
         title_col.pack(side="left", padx=(12, 0), pady=10)
         ctk.CTkLabel(
-            title_col, text="Vendor Master", font=theme.font(16, "bold"),
+            title_col, text="P&M Master", font=theme.font(16, "bold"),
             text_color=theme.TEXT_PRIMARY,
         ).pack(anchor="w")
         ctk.CTkLabel(
-            title_col, text="Vendor & Equipment Management System",
+            title_col, text="Vendor, Equipment & Contract Management System",
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w")
 
@@ -152,6 +171,12 @@ class MainWindow(ctk.CTk):
             fg_color=theme.ACCENT_SOFT, text_color=theme.ACCENT, corner_radius=999, height=30,
         )
         self.record_badge.pack(side="right")
+        self.arc_badge = ctk.CTkLabel(
+            badges, text="", font=theme.font(12, "bold"),
+            fg_color=theme.BG_CARD_ALT, text_color=theme.TEXT_SECONDARY,
+            corner_radius=999, height=30,
+        )
+        self.arc_badge.pack(side="right", padx=(8, 0))
 
     # ----------------------------------------------------------- refresh --
     def refresh_all(self):
@@ -163,7 +188,9 @@ class MainWindow(ctk.CTk):
         )
         running = len(self.equipment_store.running_records())
         self.equipment_badge.configure(text=f"  {running:,} Running Equipment  ")
+        arcs = len(self.arc_store.all_arcs())
+        self.arc_badge.configure(text=f"  {arcs:,} ARC{'s' if arcs != 1 else ''}  ")
 
-        for tab in (self.vendor_tab, self.equipment_tab):
+        for tab in (self.vendor_tab, self.equipment_tab, self.arc_tab):
             if tab is not None:
                 tab.refresh_built()

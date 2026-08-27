@@ -7,8 +7,10 @@ env/
 *.egg-info/
 .pytest_cache/
 
-# Local vendor data store and any ad-hoc exports - not committed.
+# Local data stores, saved preferences and any ad-hoc exports - not committed.
+# app_settings.json holds the CC email addresses, so it stays local too.
 data/*.csv
+data/*.json
 *.xlsx
 !data/.gitkeep
 
