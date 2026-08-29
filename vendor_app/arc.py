@@ -51,6 +51,7 @@ from vendor_app.config import (
 from vendor_app.validators import ValidationError, normalize
 
 _NUMBER_RE = re.compile(r"[^0-9.\-]")
+_TRAILING_ZEROS_RE = re.compile(r"^(\d+)\.0+$")
 _VENDOR_RE = re.compile(r"^(\d+)\s*[-/:.]?\s*(.*)$")
 
 
@@ -95,6 +96,42 @@ def display_amount(text) -> str:
         return raw
     value = parse_amount(raw)
     return format_amount(value) if value else raw
+
+
+def document_key(value) -> str:
+    """The comparison form of a document, frame or item number.
+
+    A contract number is the join between the two files, and the two files
+    do not always write it identically. The same purchasing document arrives
+    as 4600001201 from one export and, when the column was numeric and the
+    sheet was read by a spreadsheet, as "4600001201.0"; as " 4600001201 "
+    with padding; as "'4600001201" with Excel's text marker; as
+    "4,600,001,201" once a thousands separator has been applied; and as
+    "0004600001201" wherever SAP has zero-padded it. Item numbers show the
+    same split between "10" and "00010".
+
+    Comparing the raw text means a contract that plainly HAS frame orders is
+    reported as having none, which is the one answer this module must never
+    get wrong. So every identity comparison goes through this: padding,
+    markers, separators and a numeric column's trailing ".0" are removed, a
+    purely numeric key is compared without its leading zeros, and anything
+    else is compared case-insensitively.
+
+    It only ever normalises the FORM of a number. Two genuinely different
+    numbers can never collide here, because nothing but formatting is
+    stripped.
+    """
+    text = normalize(value).replace("\u00a0", " ").strip().lstrip("'").strip()
+    if not text:
+        return ""
+    text = text.replace(" ", "")
+    match = _TRAILING_ZEROS_RE.match(text)
+    if match:
+        text = match.group(1)
+    unseparated = text.replace(",", "")
+    if unseparated.isdigit():
+        return unseparated.lstrip("0") or "0"
+    return text.casefold()
 
 
 def split_vendor(text):
@@ -233,7 +270,9 @@ class _Table:
 
     # ------------------------------------------------------------- keys --
     def key_of(self, record):
-        return tuple(normalize(record.get(k, "")).lower() for k in self.key_fields)
+        # Canonical, not raw: the same row re-imported from a differently
+        # formatted export must land on itself rather than being duplicated.
+        return tuple(document_key(record.get(k, "")) for k in self.key_fields)
 
     @staticmethod
     def row_id(key):
@@ -270,7 +309,7 @@ class _Table:
         """`key` is a tuple of the key columns, or a row id string."""
         if isinstance(key, str):
             key = self.key_from_id(key)
-        needle = tuple(normalize(part).lower() for part in key)
+        needle = tuple(document_key(part) for part in key)
         if not any(needle):
             return None
         for record in self.records:
@@ -351,26 +390,39 @@ class ArcStore:
         return list(self.fos.records)
 
     def items_for_document(self, document):
-        needle = normalize(document).lower()
+        needle = document_key(document)
         return [r for r in self.arcs.records
-                if normalize(r.get("purchasing_document", "")).lower() == needle]
+                if document_key(r.get("purchasing_document", "")) == needle]
 
     def fos_for_document(self, document):
-        needle = normalize(document).lower()
+        """Every Table 2 row whose Contract No. names this document.
+
+        The join between the two files, so it compares canonical numbers -
+        see document_key. Matching the raw text here is what would report a
+        contract with frame orders as having none.
+        """
+        needle = document_key(document)
         return [r for r in self.fos.records
-                if normalize(r.get("contract_no", "")).lower() == needle]
+                if document_key(r.get("contract_no", "")) == needle]
 
     def items_for_frame(self, frame):
-        needle = normalize(frame).lower()
+        needle = document_key(frame)
         return [r for r in self.fos.records
-                if normalize(r.get("frame_numbers", "")).lower() == needle]
+                if document_key(r.get("frame_numbers", "")) == needle]
 
     def frames_for_document(self, document):
-        """The distinct frame numbers ordered against a contract."""
+        """The distinct frame orders raised against a contract.
+
+        Distinct by canonical frame number, but each is reported as it was
+        written, so the screen shows what is in the file.
+        """
         seen = OrderedDict()
         for row in self.fos_for_document(document):
-            seen.setdefault(normalize(row.get("frame_numbers", "")), None)
-        return [f for f in seen if f]
+            written = normalize(row.get("frame_numbers", ""))
+            key = document_key(written)
+            if key:
+                seen.setdefault(key, written)
+        return list(seen.values())
 
     # --------------------------------------------------------- roll-ups --
     def documents(self):
@@ -382,23 +434,27 @@ class ArcStore:
         target value, one validity and one release state.
         """
         grouped = OrderedDict()
+        written = {}
         for record in self.arcs.records:
-            document = normalize(record.get("purchasing_document", ""))
-            grouped.setdefault(document, []).append(record)
+            key = document_key(record.get("purchasing_document", ""))
+            grouped.setdefault(key, []).append(record)
+            # Keyed canonically so a document written two ways is one
+            # contract, but shown as the file wrote it the first time.
+            written.setdefault(key, normalize(record.get("purchasing_document", "")))
 
         documents = OrderedDict()
-        for document, rows in grouped.items():
+        for key, rows in grouped.items():
             header = {}
-            for key in ARC_HEADER_KEYS:
-                header[key] = next(
-                    (normalize(r.get(key, "")) for r in rows if normalize(r.get(key, ""))),
+            for field in ARC_HEADER_KEYS:
+                header[field] = next(
+                    (normalize(r.get(field, "")) for r in rows if normalize(r.get(field, ""))),
                     "",
                 )
-            documents[document] = {"document": document, "header": header, "items": rows}
+            documents[key] = {"document": written[key], "header": header, "items": rows}
         return documents
 
     def header_for(self, document):
-        entry = self.documents().get(normalize(document))
+        entry = self.documents().get(document_key(document))
         return entry["header"] if entry else {}
 
     def target_value(self, document) -> float:
@@ -467,13 +523,13 @@ class ArcStore:
                      for e in documents.values())
         released = sum(parse_amount(r.get("released_value", ""))
                        for r in self.fos.records)
-        known = {d.lower() for d in documents}
+        known = set(documents)          # already canonical keys
         orphan_frames = {
-            normalize(r.get("frame_numbers", ""))
+            document_key(r.get("frame_numbers", ""))
             for r in self.fos.records
-            if normalize(r.get("contract_no", "")).lower() not in known
+            if document_key(r.get("contract_no", "")) not in known
         }
-        frames = {normalize(r.get("frame_numbers", "")) for r in self.fos.records}
+        frames = {document_key(r.get("frame_numbers", "")) for r in self.fos.records}
         return {
             "arcs": len(documents),
             "arc_items": len(self.arcs.records),
@@ -493,7 +549,8 @@ class ArcStore:
         dropped - an order against a mistyped contract has to stay visible.
         """
         tree = []
-        for document, entry in self.documents().items():
+        for entry in self.documents().values():
+            document = entry["document"]
             tree.append({
                 "document": document,
                 "header": entry["header"],
@@ -503,9 +560,9 @@ class ArcStore:
                 "released": self.released_against(document),
             })
 
-        known = {d.lower() for d in self.documents()}
+        known = set(self.documents())   # already canonical keys
         orphans = [r for r in self.fos.records
-                   if normalize(r.get("contract_no", "")).lower() not in known]
+                   if document_key(r.get("contract_no", "")) not in known]
         if orphans:
             tree.append({
                 "document": "(no contract on file)",

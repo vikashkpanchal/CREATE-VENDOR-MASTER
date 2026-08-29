@@ -5,7 +5,8 @@ Laid out in the order the questions get asked:
     KPI cards
     ARC Expiry Analysis          status, release position, trend, what expires in 30 days
     FO Expiry Analysis           the same, for the frame orders
-    ARC Without FO               a contract with nothing ordered against it
+    ARC Without FO               a contract with not one frame order against it
+    FO Without a Contract        the other side of that join, kept beside it
     Pending Approval             release indicator S - nothing can be ordered yet
     ARC vs FO Value Difference   target 10 Cr - released 6 Cr leaves 4 Cr to order
     Vendor Analysis              contracts vs frame orders, per vendor
@@ -74,7 +75,8 @@ class ArcDashboardTab(ctk.CTkFrame):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.store = store
         self.analysis = None
-        self._tables = {}      # report key -> (EditableTable, count pill, Report)
+        self._tables = {}      # report key -> (EditableTable, count pill)
+        self._notes = {}       # report key -> the section's note label
         self._build()
         self.refresh()
 
@@ -133,6 +135,7 @@ class ArcDashboardTab(ctk.CTkFrame):
         self._build_arc_expiry(body)
         self._build_fo_expiry(body)
         self._build_report_section(body, "arc_without_fo")
+        self._build_report_section(body, "fo_without_arc")
         self._build_report_section(body, "pending_release")
         self._build_report_section(body, "value_difference")
         self._build_vendor_section(body)
@@ -223,12 +226,15 @@ class ArcDashboardTab(ctk.CTkFrame):
         ctk.CTkLabel(
             text, text=title, font=theme.h2_font(), text_color=theme.TEXT_PRIMARY,
         ).pack(anchor="w")
-        if note:
-            ctk.CTkLabel(
-                text, text=note, font=theme.small_font(), text_color=theme.TEXT_MUTED,
-                anchor="w", justify="left",
-            ).pack(anchor="w", pady=(2, 0))
-        return box, head
+        # Kept and re-set on refresh: a section's note can carry a live
+        # warning (the two files not joining up), which would otherwise be
+        # frozen at whatever was true when the page was built.
+        note_label = ctk.CTkLabel(
+            text, text=note, font=theme.small_font(), text_color=theme.TEXT_MUTED,
+            anchor="w", justify="left", wraplength=900,
+        )
+        note_label.pack(anchor="w", pady=(2, 0))
+        return box, head, note_label
 
     def _report_table(self, parent, head, report_key, report):
         """The count badge, per-report export button and read-only grid."""
@@ -247,12 +253,13 @@ class ArcDashboardTab(ctk.CTkFrame):
 
     def _build_report_section(self, parent, report_key):
         report = self.analysis.report(report_key)
-        box, head = self._section(parent, report.title, report.note)
+        box, head, note = self._section(parent, report.title, report.note)
+        self._notes[report_key] = note
         self._report_table(box, head, report_key, report)
 
     def _build_arc_expiry(self, parent):
         report = self.analysis.report("arc_expiring")
-        box, head = self._section(
+        box, head, _note = self._section(
             parent, "ARC Expiry Analysis",
             "Which contracts are live, which have lapsed, and which need action now.",
         )
@@ -275,7 +282,7 @@ class ArcDashboardTab(ctk.CTkFrame):
 
     def _build_fo_expiry(self, parent):
         report = self.analysis.report("fo_expiring")
-        box, head = self._section(
+        box, head, _note = self._section(
             parent, "FO Expiry Analysis",
             "The same read on the orders: what is running, what has lapsed, "
             "and what needs extending.",
@@ -294,7 +301,8 @@ class ArcDashboardTab(ctk.CTkFrame):
 
     def _build_vendor_section(self, parent):
         report = self.analysis.report("vendor_analysis")
-        box, head = self._section(parent, report.title, report.note)
+        box, head, note = self._section(parent, report.title, report.note)
+        self._notes[report.key] = note
         self.vendor_chart = GroupedBarChart(
             box, "ARC value vs FO value by vendor",
             series=("ARC Value", "FO Value"), formatter=format_amount,
@@ -350,6 +358,8 @@ class ArcDashboardTab(ctk.CTkFrame):
             if entry is None:
                 continue
             table, count = entry
+            if report.key in self._notes:
+                self._notes[report.key].configure(text=report.note)
             table.clear()
             for index, row in enumerate(report.rows[:200]):
                 table.add_row(index, report.values(row))

@@ -28,7 +28,7 @@ from collections import OrderedDict
 from datetime import date
 
 from vendor_app.arc import (
-    days_until, format_amount, format_date, parse_amount, split_vendor,
+    days_until, document_key, format_amount, format_date, parse_amount, split_vendor,
 )
 from vendor_app.config import (
     ACTION_WINDOW, EXPIRY_WINDOWS, RELEASE_INDICATORS, RELEASE_PENDING,
@@ -185,6 +185,12 @@ class ArcAnalysis:
         self.today = today or date.today()
         self.arcs = [self._arc_row(entry) for entry in store.documents().values()]
         self.fos = self._fo_rows()
+        # Which side of the join a frame order falls on. Computed once, here,
+        # so "this contract has no frame order" and "this frame order has no
+        # contract" are always two views of the same comparison.
+        known = {document_key(r["document"]) for r in self.arcs}
+        for row in self.fos:
+            row["contract_known"] = document_key(row["contract_no"]) in known
 
     # ------------------------------------------------------------- rows --
     def _arc_row(self, entry):
@@ -297,14 +303,46 @@ class ArcAnalysis:
 
     # --------------------------------------------------- 15: ARC without FO --
     def arcs_without_fo(self):
-        """A contract is in place but nothing has been ordered against it.
+        """A contract against which not one frame order has been raised.
 
-        The first thing management asks for, because it is value released
-        and then forgotten. Biggest contract first.
+        Literally that: every purchasing document in Table 1 for which no
+        row in Table 2 names it as Contract No. Biggest contract first,
+        because it is value released and then forgotten.
+
+        The match is on the canonical contract number (see document_key), so
+        a document written "4600001201" in one file and "4600001201.0" or
+        "0004600001201" in the other is one contract, not two - matching the
+        raw text is what would list a contract here that plainly has orders.
         """
         return sorted(
             [r for r in self.arcs if r["frame_count"] == 0],
             key=lambda r: r["target_value"], reverse=True,
+        )
+
+    def fos_without_arc(self):
+        """The other side of the same join: a frame order naming a contract
+        that is not in Table 1 at all.
+
+        Kept next to ARC Without FO deliberately. If both lists are long at
+        once, the two files are not matching up - which is a different
+        problem from a contract genuinely having no orders, and the pair is
+        what makes the difference visible.
+        """
+        return sorted(
+            [r for r in self.fos if not r["contract_known"]],
+            key=lambda r: r["released"], reverse=True,
+        )
+
+    def join_note(self):
+        """A warning when the two files do not appear to line up."""
+        unmatched = len(self.fos_without_arc())
+        if not unmatched or not self.arcs_without_fo():
+            return ""
+        return (
+            f"  Note: {unmatched} frame order(s) name a contract that is not in "
+            "Table 1 at all. If a contract listed here should have orders "
+            "against it, check it against the FO Without a Contract list below - "
+            "the two files may be writing the same number differently."
         )
 
     # ------------------------------------------ 16: ARC vs FO value gap --
@@ -332,9 +370,9 @@ class ArcAnalysis:
 
         # A frame order against a contract that is not in Table 1 still
         # belongs to its vendor; dropping it would understate that vendor.
-        known = {r["document"].lower() for r in self.arcs}
+        known = {document_key(r["document"]) for r in self.arcs}
         for row in self.fos:
-            if row["contract_no"].lower() in known:
+            if document_key(row["contract_no"]) in known:
                 continue
             key = (row["vendor_code"], row["vendor_name"])
             bucket = grouped.setdefault(key, self._empty_vendor(key))
@@ -427,6 +465,10 @@ class ArcAnalysis:
              f"{len(self.fos_expiring()):,}", "warn"),
             ("pending_release", "Pending Approval (S)",
              f"{len(self.pending_release()):,}", "warn"),
+            # Sits beside ARC Without FO on purpose: together they say
+            # whether the two files actually join up.
+            ("fo_without_arc", "FO Without a Contract",
+             f"{len(self.fos_without_arc()):,}", "warn"),
         ]
 
     # ----------------------------------------------------------- reports --
@@ -451,7 +493,15 @@ class ArcAnalysis:
                    ["document", "vendor_name", "description", "plant", "start", "end",
                     "target_value", "days_left", "expiry_status"],
                    self.arcs_without_fo(),
-                   "A contract is in place but no frame order has been raised on it."),
+                   "A contract is in place but not one frame order names it."
+                   + self.join_note()),
+            Report("fo_without_arc", "FO Without a Contract",
+                   ["frame", "contract_no", "vendor_name", "description", "plant",
+                    "start", "end", "released", "item_count"],
+                   self.fos_without_arc(),
+                   "A frame order naming a Contract No. that is not in Table 1. "
+                   "Either the contract has not been imported, or the two files "
+                   "write its number differently."),
             Report("arc_expiring", f"ARC Expiring in {window} Days",
                    ["document", "vendor_name", "end", "days_left", "target_value",
                     "released", "difference", "plant"],
@@ -529,6 +579,8 @@ class ArcAnalysis:
                           "are the figures the total adds up.")
         if key == "arc_without_fo":
             return self.report("arc_without_fo")
+        if key == "fo_without_arc":
+            return self.report("fo_without_arc")
         if key == "arc_expiring":
             return self.report("arc_expiring")
         if key == "fo_expiring":
@@ -571,6 +623,7 @@ class ArcAnalysis:
                  for d in windows]
         rows += [
             ("ARC Without FO", f"{len(self.arcs_without_fo()):,}"),
+            ("FO Without a Contract", f"{len(self.fos_without_arc()):,}"),
             ("ARC vs FO Value Difference",
              format_amount(self.total_arc_value() - self.total_fo_value())),
             ("Vendors Covered", f"{len(self.vendor_analysis()):,}"),

@@ -229,6 +229,23 @@ Purchasing Document  (the contract - the key everything is filed against)
   Excel-like paste, in-place editing and export as every other master, and a
   row is keyed on its document and item (or frame number and item), so
   re-importing the same export updates those rows instead of doubling them.
+- **The join is on the number, not on the text.** A contract number is what
+  ties the two files together, and the two files do not always write it
+  identically: the same document arrives as `4600001201` from one export and
+  as `4600001201.0` from a numeric column, `0004600001203` zero-padded,
+  `4,600,001,204` once a separator has been applied, or `' 4600001205 `
+  with Excel's text marker and padding. Every identity comparison - which
+  frame orders belong to a contract, which contract has none, which rows are
+  the same row on re-import - is made on the canonical number, so those are
+  one contract rather than two. Item numbers match the same way (`10` and
+  `00010`). Only the *form* of a number is normalised; two genuinely
+  different numbers can never collide.
+- **ARC Without FO** therefore means exactly what it says: a purchasing
+  document that no row in Table 2 names as its Contract No. Its companion
+  section, **FO Without a Contract**, is the other side of the same join, and
+  when both are non-empty the first one says so - two long lists at once mean
+  the files are not lining up, which is a different problem from a contract
+  genuinely having no orders.
 - A frame order whose Contract No. matches no document is **not dropped** - it
   is grouped under "(no contract on file)", counted on its own KPI tile, and
   still credited to its vendor, so a typo stays visible.
@@ -311,8 +328,9 @@ this page can always be taken apart into the rows it came from.
 
 **KPI cards** - Total ARC · Active ARC · Expired ARC · ARC Without FO ·
 Total ARC Value · Total FO · Total FO Value · ARC Expiring in 30 Days ·
-FO Expiring in 30 Days · Pending Approval (S). They reflow into as many
-columns as the window fits, so none is ever pushed off the edge.
+FO Expiring in 30 Days · Pending Approval (S) · FO Without a Contract. They
+reflow into as many columns as the window fits, so none is ever pushed off
+the edge.
 
 **Sections, in the order the questions get asked:**
 
@@ -320,7 +338,8 @@ columns as the window fits, so none is ever pushed off the edge.
 | --- | --- |
 | ARC Expiry Analysis | status donut, release position, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
 | FO Expiry Analysis | the same read on the frame orders - which need extending |
-| ARC Without FO | a contract is in place but nothing has been ordered against it, biggest first |
+| ARC Without FO | a contract against which not one frame order has been raised, biggest first |
+| FO Without a Contract | the other side of that join - a frame order naming a Contract No. that is not in Table 1 |
 | Pending Approval | release indicator `S` - nothing can be ordered against these yet, furthest through the approval chain first |
 | ARC vs FO Value Difference | `Target Val. (Header) - released against it`, ranked by the size of the gap either way |
 | Vendor Analysis | contract value against released value per vendor, as paired bars and as a table |
