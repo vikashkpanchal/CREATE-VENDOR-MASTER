@@ -235,6 +235,12 @@ class PieChart(tk.Frame):
 
     SIZE = 168
     THICKNESS = 34
+    # How wide a legend entry may run before it wraps onto a second line.
+    # Sized for the narrowest column a donut sits in - three charts across a
+    # dashboard - so an entry never demands more width than the legend has.
+    # A fixed wrap is deliberate: re-arranging the legend on resize made the
+    # two layouts flip each other back and forth without ever settling.
+    LEGEND_TEXT_W = 160
     DEFAULT_COLORS = ["#3987e5", "#d95926", "#8a94a6", "#34b871", "#e0ac48"]
 
     def __init__(self, master, title="", colors=None,
@@ -313,6 +319,7 @@ class PieChart(tk.Frame):
             tk.Label(
                 row, text=f"{label}  {value:,}  ({value / total * 100:.0f}%)",
                 bg=theme.BG_CARD, fg=theme.TEXT_SECONDARY, font=(theme.FONT_FAMILY, 10),
+                wraplength=self.LEGEND_TEXT_W, justify="left", anchor="w",
             ).pack(side="left")
 
 

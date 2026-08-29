@@ -17,7 +17,37 @@ ROW_HEIGHT = 34
 HEADER_FONT = (theme.FONT_FAMILY, 10, "bold")
 ROW_FONT = (theme.FONT_FAMILY, 11)
 
+# Row height is a per-style setting in ttk, not a per-widget one, so a table
+# that wants a different height gets its own derived style. Styles are named
+# by the height itself, which means two tables set to the same height share
+# one style instead of accumulating a new one per widget.
+ROW_HEIGHT_CHOICES = [
+    ("Compact", 26),
+    ("Normal", 34),
+    ("Tall", 46),
+    ("Extra tall", 60),
+]
+ROW_HEIGHT_DEFAULT = "Normal"
+
 _applied = False
+_row_styles = {}
+
+
+def row_height_style(pixels: int) -> str:
+    """The style name for a table drawn at `pixels` row height.
+
+    Derived from TREE_STYLE by the dotted-prefix rule, so it inherits every
+    colour and the heading style and overrides only the height.
+    """
+    pixels = max(18, int(pixels))
+    name = _row_styles.get(pixels)
+    if name:
+        return name
+    apply_dark_treeview_style()
+    name = f"H{pixels}.{TREE_STYLE}"
+    ttk.Style().configure(name, rowheight=pixels)
+    _row_styles[pixels] = name
+    return name
 
 
 def apply_dark_treeview_style() -> ttk.Style:

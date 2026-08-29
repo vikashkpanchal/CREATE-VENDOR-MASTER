@@ -12,6 +12,9 @@ Laid out in the order the questions get asked:
     High Risk                    expiring soon and under-ordered
     Export Reports               every table above, as one workbook
 
+Every KPI card is clickable: it opens the exact rows its figure was counted
+or summed from, so a number on this page can always be taken apart.
+
 Everything on screen comes from one ArcAnalysis built at refresh, so the
 cards, the charts and the tables can never disagree with each other. Nothing
 is computed twice and nothing is stored - the dashboard is a read of Table 1 and
@@ -32,6 +35,7 @@ from vendor_app.export import export_arc_analysis_to_excel, export_report_to_exc
 from vendor_app.gui import theme
 from vendor_app.gui.charts import BarChart, GroupedBarChart, PieChart
 from vendor_app.gui.editable_table import EditableTable
+from vendor_app.gui.style import ROW_HEIGHT_CHOICES, ROW_HEIGHT_DEFAULT
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, pill, primary_button, secondary_button
 
@@ -96,6 +100,20 @@ class ArcDashboardTab(ctk.CTkFrame):
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
         actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        # One row-height control for the page: every table below answers to it,
+        # so the whole dashboard stays visually consistent.
+        ctk.CTkLabel(
+            actions, text="Row height:", font=theme.font(10), text_color=theme.TEXT_MUTED,
+        ).pack(side="left", padx=(0, 6))
+        self.row_height_var = ctk.StringVar(value=ROW_HEIGHT_DEFAULT)
+        ctk.CTkOptionMenu(
+            actions, variable=self.row_height_var,
+            values=[name for name, _px in ROW_HEIGHT_CHOICES],
+            command=self._apply_row_height, width=120, height=28,
+            fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+            button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            font=theme.font(10), dropdown_font=theme.font(10),
+        ).pack(side="left", padx=(0, 10))
         secondary_button(actions, "Refresh", self.refresh, width=110).pack(
             side="left", padx=(0, 8)
         )
@@ -138,14 +156,27 @@ class ArcDashboardTab(ctk.CTkFrame):
 
         for key, label, value, tone in self.analysis.kpis():
             box = card(holder, fg_color=theme.BG_CARD)
-            ctk.CTkLabel(
+            title = ctk.CTkLabel(
                 box, text=label, font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
                 anchor="w", justify="left", wraplength=self.KPI_WIDTH - 34,
-            ).pack(anchor="w", padx=16, pady=(14, 2))
+            )
+            title.pack(anchor="w", padx=16, pady=(14, 2))
             figure = ctk.CTkLabel(
                 box, text=value, font=theme.display_font(), text_color=TONE_COLORS[tone],
             )
-            figure.pack(anchor="w", padx=16, pady=(0, 14))
+            figure.pack(anchor="w", padx=16, pady=(0, 4))
+            hint = ctk.CTkLabel(
+                box, text="click to view", font=theme.font(9),
+                text_color=theme.TEXT_MUTED,
+            )
+            hint.pack(anchor="w", padx=16, pady=(0, 12))
+            # Every part of the card is clickable, not just the number: a card
+            # that responds only on its digits reads as broken everywhere else.
+            for widget in (box, title, figure, hint):
+                widget.bind("<Button-1>", lambda e, k=key: self.open_kpi(k))
+                widget.configure(cursor="hand2")
+            box.bind("<Enter>", lambda e, b=box: b.configure(border_color=theme.ACCENT))
+            box.bind("<Leave>", lambda e, b=box: b.configure(border_color=theme.BORDER_SOFT))
             self._kpi_cards[key] = figure
             self._kpi_cells.append(box)
 
@@ -330,6 +361,24 @@ class ArcDashboardTab(ctk.CTkFrame):
             if shown < len(report.rows):
                 text += f" - showing {shown:,}, export for all"
             count.configure(text=f"  {text}  ")
+
+    def _apply_row_height(self, *_args):
+        pixels = dict(ROW_HEIGHT_CHOICES)[self.row_height_var.get()]
+        for table, _count in self._tables.values():
+            table.set_row_height(pixels)
+
+    # -------------------------------------------------------- drill-down --
+    def open_kpi(self, key):
+        """Open the rows behind a KPI figure."""
+        if self.analysis is None:
+            return
+        from vendor_app.gui.kpi_dialog import KpiDetailDialog
+        label, value = next(
+            ((lab, val) for k, lab, val, _tone in self.analysis.kpis() if k == key),
+            ("", ""),
+        )
+        KpiDetailDialog(self, self.analysis.kpi_report(key), figure=value,
+                        caption=f"Behind the “{label}” figure.")
 
     # ------------------------------------------------------------- export --
     def _ask_path(self, stem):

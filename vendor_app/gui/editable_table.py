@@ -20,7 +20,8 @@ from tkinter import ttk
 
 from vendor_app.gui import theme
 from vendor_app.gui.style import (
-    SCROLL_H_STYLE, SCROLL_V_STYLE, TREE_STYLE, apply_dark_treeview_style, row_tags,
+    HEADER_FONT, ROW_HEIGHT, SCROLL_H_STYLE, SCROLL_V_STYLE, TREE_STYLE,
+    apply_dark_treeview_style, row_height_style, row_tags,
 )
 
 
@@ -69,7 +70,9 @@ class EditableTable(tk.Frame):
         body.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
 
-        kwargs = {"columns": self.columns, "show": "headings", "style": TREE_STYLE}
+        self.row_height = ROW_HEIGHT
+        kwargs = {"columns": self.columns, "show": "headings",
+                  "style": row_height_style(self.row_height)}
         if height is not None:
             kwargs["height"] = height
         self.tree = ttk.Treeview(body, **kwargs)
@@ -81,7 +84,12 @@ class EditableTable(tk.Frame):
                 heading["command"] = lambda k=key: on_sort(k)
             self.tree.heading(key, **heading)
             anchor = "center" if key in ("sr_no", "vendor_code", "status") else "w"
-            self.tree.column(key, width=widths.get(key, 150), minwidth=60,
+            # A column is never narrower than its own title. The header is the
+            # only thing on screen that says what a column IS, so it is the one
+            # piece of text that must never be cut - the width asked for is a
+            # floor, not a ceiling.
+            width = max(widths.get(key, 150), self._header_width(headers.get(key, key)))
+            self.tree.column(key, width=width, minwidth=width,
                              anchor=anchor, stretch=False)
 
         # Highest-priority visual states first: ttk resolves overlapping tag
@@ -106,6 +114,26 @@ class EditableTable(tk.Frame):
 
         self._bind_events()
         self._build_menu()
+
+    # -------------------------------------------------------- appearance --
+    @staticmethod
+    def _header_width(text):
+        """The pixels the widest line of a wrapped header needs, plus padding."""
+        try:
+            import tkinter.font as tkfont
+            measurer = tkfont.Font(font=HEADER_FONT)
+            widest = max(measurer.measure(line) for line in str(text).split("\n"))
+        except Exception:
+            widest = 8 * max(len(line) for line in str(text).split("\n"))
+        # 20px of heading padding either side, plus room for the sort arrow.
+        return widest + 34
+
+    def set_row_height(self, pixels):
+        """Redraw at a different row height. Rows are the only thing that
+        changes - the header keeps its own height and stays put."""
+        self.row_height = max(18, int(pixels))
+        self.tree.configure(style=row_height_style(self.row_height))
+        self._place_marker()
 
     # ------------------------------------------------------------- events --
     def _bind_events(self):

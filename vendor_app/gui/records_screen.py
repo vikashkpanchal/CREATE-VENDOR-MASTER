@@ -18,6 +18,7 @@ from vendor_app.gui.loading import run_with_loading
 from vendor_app.gui.paste_dialog import PasteRowsDialog
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
+from vendor_app.gui.style import ROW_HEIGHT_CHOICES, ROW_HEIGHT_DEFAULT
 from vendor_app.gui.widgets import card, danger_button, pill, primary_button, secondary_button
 
 
@@ -82,6 +83,7 @@ class RecordsScreen(ctk.CTkFrame):
     def export(self, records, path): raise NotImplementedError
     def delete_record(self, record): return False
     def extra_actions(self, parent): pass
+    def extra_view_controls(self, parent): pass
     def on_row_double_click(self, row_id, column_key): pass
     def is_row_locked(self, row_id): return False
 
@@ -149,22 +151,74 @@ class RecordsScreen(ctk.CTkFrame):
         )
         self.extra_actions(right_actions)
 
+        # The hint and the view controls share a row, with the controls in a
+        # reserved grid column so a long hint can never push them off-screen.
+        hint_row = ctk.CTkFrame(self, fg_color="transparent")
+        hint_row.pack(fill="x", padx=20, pady=(0, 6))
+        hint_row.grid_columnconfigure(0, weight=1)
+        hint_row.grid_columnconfigure(1, weight=0)
         ctk.CTkLabel(
-            self, text=self.GRID_HINT, font=theme.font(10), text_color=theme.TEXT_MUTED,
-        ).pack(anchor="w", padx=20, pady=(0, 6))
+            hint_row, text=self.GRID_HINT, font=theme.font(10),
+            text_color=theme.TEXT_MUTED, anchor="w", justify="left",
+        ).grid(row=0, column=0, sticky="w")
 
-        wrap = card(self, fg_color=theme.BG_CARD)
-        wrap.pack(fill="both", expand=True, padx=20, pady=(0, 16))
-        wrap.grid_rowconfigure(0, weight=1)
-        wrap.grid_columnconfigure(0, weight=1)
+        view = ctk.CTkFrame(hint_row, fg_color="transparent")
+        view.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.extra_view_controls(view)
+        ctk.CTkLabel(
+            view, text="Row height:", font=theme.font(10), text_color=theme.TEXT_MUTED,
+        ).pack(side="left", padx=(0, 6))
+        self.row_height_var = ctk.StringVar(value=ROW_HEIGHT_DEFAULT)
+        ctk.CTkOptionMenu(
+            view, variable=self.row_height_var,
+            values=[name for name, _px in ROW_HEIGHT_CHOICES],
+            command=self._on_row_height, width=120, height=26,
+            fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+            button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            font=theme.font(10), dropdown_font=theme.font(10),
+        ).pack(side="left")
+
+        self._grid_wrap = card(self, fg_color=theme.BG_CARD)
+        self._grid_wrap.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        self._grid_wrap.grid_rowconfigure(0, weight=1)
+        self._grid_wrap.grid_columnconfigure(0, weight=1)
+        self._build_table()
+
+    def _build_table(self):
         self.table = EditableTable(
-            wrap, self.columns, self.headers, self.widths,
+            self._grid_wrap, self.columns, self.headers, self.widths,
             editable=self.editable_keys, on_edit=self._on_edit, on_sort=self._on_sort,
             double_click_edits=self.DOUBLE_CLICK_EDITS,
             on_double_click=self.on_row_double_click,
             is_row_locked=self.is_row_locked,
         )
         self.table.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        self.table.set_row_height(self._row_height_pixels())
+
+    def _row_height_pixels(self):
+        choice = self.row_height_var.get() if hasattr(self, "row_height_var") else None
+        return dict(ROW_HEIGHT_CHOICES).get(choice, dict(ROW_HEIGHT_CHOICES)[ROW_HEIGHT_DEFAULT])
+
+    def _on_row_height(self, *_args):
+        self.table.set_row_height(self._row_height_pixels())
+
+    def set_columns(self, columns, headers=None, widths=None):
+        """Swap the grid's column set, keeping the current search and sort.
+
+        The Treeview's columns are fixed at construction, so the grid is
+        rebuilt rather than reconfigured - which is also why the row-height
+        choice is re-applied here instead of being left on the old widget.
+        """
+        self.columns = list(columns)
+        if headers is not None:
+            self.headers = headers
+        if widths is not None:
+            self.widths = widths
+        if self._sort_key not in self.columns:
+            self._sort_key, self._sort_desc = None, False
+        self.table.destroy()
+        self._build_table()
+        self.refresh()
 
     # ------------------------------------------------------------ refresh --
     def _on_sort(self, key):

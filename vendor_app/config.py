@@ -482,7 +482,7 @@ ARC_DERIVED_LABELS = {
     "value_difference": "Difference (Target - Released)",
 }
 
-ARC_DISPLAY_COLUMNS = ARC_KEYS[:10] + ARC_DERIVED_KEYS + ARC_KEYS[10:]
+ARC_DISPLAY_COLUMNS = ARC_KEYS + ARC_DERIVED_KEYS
 
 ARC_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",
@@ -605,7 +605,7 @@ FO_DERIVED_LABELS = {
     "fo_released_total": "FO Released Total",
 }
 
-FO_DISPLAY_COLUMNS = FO_KEYS[:18] + FO_DERIVED_KEYS + FO_KEYS[18:]
+FO_DISPLAY_COLUMNS = FO_KEYS + FO_DERIVED_KEYS
 
 FO_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",

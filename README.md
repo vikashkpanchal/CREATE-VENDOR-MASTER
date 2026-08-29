@@ -221,11 +221,14 @@ Purchasing Document  (the contract - the key everything is filed against)
   matches SAP.
 - **Structure** shows each document with the items it covers and the frame
   orders placed against it, released against target in one cell.
-- **ARC Records / FO Records** are the flat grids, with the same search,
-  unlimited import, Excel-like paste, in-place editing and export as every
-  other master. A row is keyed on its document and item (or frame number and
-  item), so re-importing the same export updates those rows instead of
-  doubling them.
+- **ARC Records / FO Records** open showing the input table exactly as it
+  arrives - the report's own columns, in the report's own order, and nothing
+  else. Tick **Computed columns** to append what the app works out across a
+  contract or a frame order; they are always added after the input set, never
+  interleaved into it. The grids have the same search, unlimited import,
+  Excel-like paste, in-place editing and export as every other master, and a
+  row is keyed on its document and item (or frame number and item), so
+  re-importing the same export updates those rows instead of doubling them.
 - A frame order whose Contract No. matches no document is **not dropped** - it
   is grouped under "(no contract on file)", counted on its own KPI tile, and
   still credited to its vendor, so a typo stays visible.
@@ -299,6 +302,12 @@ internal column names. Unrecognised columns are ignored, not rejected.
 
 The first sub-tab, and the reason the data is kept. Built from one pass over
 both tables, so the cards, the charts and the tables always agree.
+
+**Every KPI card is clickable.** Click a figure and a pop-up lists the exact
+rows it was counted or summed from - the contracts behind "Total ARC", the
+frame orders behind "Total FO Value", the two contracts behind "ARC Without
+FO" - with the same row-height control and its own Excel export. A number on
+this page can always be taken apart into the rows it came from.
 
 **KPI cards** - Total ARC · Active ARC · Expired ARC · ARC Without FO ·
 Total ARC Value · Total FO · Total FO Value · ARC Expiring in 30 Days ·
@@ -375,6 +384,16 @@ says drafting is unavailable - preview still works everywhere.
 
 ## Tables
 
+Every grid in the app shares the same behaviour:
+
+- **The header row is fixed.** It stays put while the rows scroll under it,
+  at any row height, and a column is never drawn narrower than its own title -
+  the header is the only thing on screen that says what a column *is*, so it
+  is the one piece of text that is never allowed to be cut.
+- **Row height is adjustable** - Compact, Normal, Tall or Extra tall - from
+  the control above each grid. The dashboard has one control for all its
+  tables; each drill-down pop-up has its own.
+
 Master Data Records, Multi Vendor Search results, and the Audit Log all
 use the same themed table component (`vendor_app/gui/style.py`): headers
 are always pre-wrapped onto two clean lines and never truncated or
@@ -422,6 +441,7 @@ vendor_app/
     editable_table.py            in-place cell editing + copy-out to Excel
     scroll_canvas.py             2-axis scrollable canvas
     charts.py                    ranked-bar / split-bar / donut / paired-bar charts
+    kpi_dialog.py                the rows behind a clicked dashboard figure
     filter_dropdown.py           Excel-style multi-select cascading filter
     paste_grid.py                reusable Excel-like paste grid (Ctrl+V)
     paste_dialog.py              "Paste Rows" dialog built on the paste grid

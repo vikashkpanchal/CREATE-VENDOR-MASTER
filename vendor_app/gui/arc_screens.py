@@ -14,6 +14,8 @@ with its own detail. The decoded release columns are read-only in the grid
 too, and chosen from a list in the record dialog.
 """
 
+import customtkinter as ctk
+
 from vendor_app.config import (
     ARC_COLUMN_WIDTHS, ARC_DERIVED_KEYS, ARC_DISPLAY_COLUMNS, ARC_KEYS, ARC_KEY_FIELDS,
     ARC_LABELS, ARC_WRAPPED_LABELS, FO_COLUMN_WIDTHS, FO_DERIVED_KEYS,
@@ -23,6 +25,7 @@ from vendor_app.config import (
 from vendor_app.export import export_arcs_to_excel, export_fos_to_excel
 from vendor_app.importer import _normalize_header, _read_table
 from vendor_app.validators import ValidationError
+from vendor_app.gui import theme
 from vendor_app.gui.records_screen import RecordsScreen
 
 # The header shapes a real download carries, beyond our own labels. SAP
@@ -136,10 +139,40 @@ def _load_rows(path, keys, labels):
 
 
 class _ArcScreenBase(RecordsScreen):
-    """Shared wiring for two grids whose rows are keyed on several columns."""
+    """Shared wiring for two grids whose rows are keyed on several columns.
+
+    Both open showing the input table exactly as it arrives - the report's
+    own columns, in the report's own order, and nothing else. The computed
+    columns are real but they are not part of the file, so they are added on
+    request and always after the input set, never interleaved into it.
+    """
 
     KEY_FIELDS = ()
     TABLE_ATTR = ""
+    INPUT_KEYS = ()
+    DERIVED_KEYS = ()
+    INPUT_NOTE = "the input file's columns"
+
+    def extra_view_controls(self, parent):
+        self.show_computed = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            parent, text="Computed columns", variable=self.show_computed,
+            command=self.apply_column_choice, font=theme.font(10),
+            text_color=theme.TEXT_SECONDARY, checkbox_width=16, checkbox_height=16,
+            corner_radius=4, border_width=1, fg_color=theme.ACCENT,
+            hover_color=theme.ACCENT_HOVER, border_color=theme.BG_INPUT_BORDER,
+        ).pack(side="left", padx=(0, 16))
+
+    def apply_column_choice(self):
+        columns = ["sr_no"] + list(self.INPUT_KEYS)
+        if self.show_computed.get():
+            columns += list(self.DERIVED_KEYS)
+        self.set_columns(columns)
+
+    def row_values(self, record, index):
+        # Driven by the CURRENT column set, so toggling the computed columns
+        # needs no second row builder.
+        return [index] + [record.get(k, "") for k in self.columns[1:]]
 
     def table_of(self):
         return getattr(self.store, self.TABLE_ATTR)
@@ -165,13 +198,16 @@ class ArcRecordsScreen(_ArcScreenBase):
     """Table 1: ARC data, one row per item of a purchasing document."""
 
     TITLE = "ARC Records"
-    SUBTITLE = ("Table 1 - ARC data (ME3L export), one row per contract item. "
-                "The header facts repeat down a document's items; its Target Val. "
-                "(Header) is read once, never summed across them.")
+    SUBTITLE = ("Table 1 - ARC data (ME3L export), shown exactly as the file "
+                "arrives: one row per contract item, the report's own columns in "
+                "its own order. Tick Computed columns to add what the app works "
+                "out across a contract.")
     DOUBLE_CLICK_EDITS = False
     IMPORT_LABEL = "Import ARC Data..."
     KEY_FIELDS = ARC_KEY_FIELDS
     TABLE_ATTR = "arcs"
+    INPUT_KEYS = tuple(ARC_KEYS)
+    DERIVED_KEYS = tuple(ARC_DERIVED_KEYS)
     paste_keys = tuple(ARC_KEYS)
     paste_labels = ARC_LABELS
     paste_note = ("Paste ARC rows copied from the ME3L export, one line item per row. "
@@ -185,7 +221,7 @@ class ArcRecordsScreen(_ArcScreenBase):
     def __init__(self, master, store, on_data_changed=None):
         self.store = store
         super().__init__(
-            master, ["sr_no"] + ARC_DISPLAY_COLUMNS, ARC_WRAPPED_LABELS, ARC_COLUMN_WIDTHS,
+            master, ["sr_no"] + list(ARC_KEYS), ARC_WRAPPED_LABELS, ARC_COLUMN_WIDTHS,
             editable_keys=set(ARC_KEYS) - set(ARC_KEY_FIELDS) - self.READ_ONLY_KEYS,
             on_data_changed=on_data_changed,
         )
@@ -200,9 +236,6 @@ class ArcRecordsScreen(_ArcScreenBase):
             return rows
         return [r for r in rows
                 if any(needle in str(r.get(k, "")).lower() for k in ARC_DISPLAY_COLUMNS)]
-
-    def row_values(self, record, index):
-        return [index] + [record.get(k, "") for k in ARC_DISPLAY_COLUMNS]
 
     def commit(self, row_id, key, value):
         if key in ARC_DERIVED_KEYS:
@@ -259,14 +292,16 @@ class FoRecordsScreen(_ArcScreenBase):
     """Table 2: framework & contract tracking, one row per frame order item."""
 
     TITLE = "FO Records"
-    SUBTITLE = ("Table 2 - framework & contract tracking, one row per frame order "
-                "item. Contract No., Contract Value and the contract validity dates "
-                "map from Table 1 and repeat here; Released, Actual and Opening "
-                "Value are the item's own and do add up.")
+    SUBTITLE = ("Table 2 - framework & contract tracking, shown exactly as the "
+                "file arrives: one row per frame order item, in the report's own "
+                "column order. Contract No., Contract Value and the contract "
+                "validity dates map from Table 1.")
     DOUBLE_CLICK_EDITS = False
     IMPORT_LABEL = "Import FO Data..."
     KEY_FIELDS = FO_KEY_FIELDS
     TABLE_ATTR = "fos"
+    INPUT_KEYS = tuple(FO_KEYS)
+    DERIVED_KEYS = tuple(FO_DERIVED_KEYS)
     paste_keys = tuple(FO_KEYS)
     paste_labels = FO_LABELS
     paste_note = ("Paste frame order rows copied from the tracking report. "
@@ -276,7 +311,7 @@ class FoRecordsScreen(_ArcScreenBase):
     def __init__(self, master, store, on_data_changed=None):
         self.store = store
         super().__init__(
-            master, ["sr_no"] + FO_DISPLAY_COLUMNS, FO_WRAPPED_LABELS, FO_COLUMN_WIDTHS,
+            master, ["sr_no"] + list(FO_KEYS), FO_WRAPPED_LABELS, FO_COLUMN_WIDTHS,
             editable_keys=set(FO_KEYS) - set(FO_KEY_FIELDS),
             on_data_changed=on_data_changed,
         )
@@ -288,9 +323,6 @@ class FoRecordsScreen(_ArcScreenBase):
             return rows
         return [r for r in rows
                 if any(needle in str(r.get(k, "")).lower() for k in FO_DISPLAY_COLUMNS)]
-
-    def row_values(self, record, index):
-        return [index] + [record.get(k, "") for k in FO_DISPLAY_COLUMNS]
 
     def commit(self, row_id, key, value):
         if key in FO_DERIVED_KEYS:

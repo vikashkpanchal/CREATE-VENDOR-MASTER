@@ -491,6 +491,50 @@ class ArcAnalysis:
                    f"Expiring within {window} days."),
         ]
 
+    # KPI id -> the rows that figure is counting. Clicking a card opens
+    # exactly these, so a number on the dashboard can always be taken apart
+    # into the contracts or frame orders it came from.
+    def kpi_report(self, key):
+        window = ACTION_WINDOW
+        if key == "total_arc":
+            return Report("kpi_total_arc", "All Contracts", self.ARC_COLUMNS,
+                          sorted(self.arcs, key=lambda r: -r["target_value"]),
+                          "Every purchasing document in Table 1 - one row per "
+                          "contract, not per item.")
+        if key == "active_arc":
+            return Report("kpi_active_arc", "Active ARC", self.ARC_COLUMNS,
+                          sorted(self.active_arcs(), key=lambda r: r["days_left"]),
+                          "Contracts whose validity has not yet passed, soonest "
+                          "to expire first.")
+        if key == "expired_arc":
+            return Report("kpi_expired_arc", "Expired ARC", self.ARC_COLUMNS,
+                          sorted(self.expired_arcs(), key=lambda r: r["days_left"]),
+                          "Contracts whose Validity Period End is in the past.")
+        if key == "total_arc_value":
+            return Report("kpi_arc_value", "Total ARC Value", self.ARC_COLUMNS,
+                          sorted(self.arcs, key=lambda r: -r["target_value"]),
+                          "Target Val. (Header) per contract, read once each - "
+                          "these are the figures the total adds up.")
+        if key == "total_fo":
+            return Report("kpi_total_fo", "All Frame Orders", self.FO_COLUMNS,
+                          sorted(self.fos, key=lambda r: -r["released"]),
+                          "Every frame number in Table 2 - one row per order, "
+                          "not per item.")
+        if key == "total_fo_value":
+            return Report("kpi_fo_value", "Total FO Value", self.FO_COLUMNS,
+                          sorted(self.fos, key=lambda r: -r["released"]),
+                          "Released Value summed within each frame order - these "
+                          "are the figures the total adds up.")
+        if key == "arc_without_fo":
+            return self.report("arc_without_fo")
+        if key == "arc_expiring":
+            return self.report("arc_expiring")
+        if key == "fo_expiring":
+            return self.report("fo_expiring")
+        if key == "pending_release":
+            return self.report("pending_release")
+        raise KeyError(key)
+
     def report(self, key):
         for report in self.reports():
             if report.key == key:
