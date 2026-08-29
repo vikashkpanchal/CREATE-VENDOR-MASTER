@@ -4,8 +4,7 @@ The whole application is four things, and the navigation says so:
 
     Vendor Master     Records | Search | Change Log
     Equipment Master  Records | Search | De-mob | Dashboard | Change Log
-    ARC & FO Master   Dashboard | Structure | ARC Records | FO Records |
-                      Line Items | Change Log
+    ARC & FO Master   Dashboard | Structure | ARC Records | FO Records | Change Log
     Communication     Defective Invoice | Equipment Breakdown
 
 Everything else is a sub-tab inside one of those four, so the top bar
@@ -189,7 +188,9 @@ class MainWindow(ctk.CTk):
         )
         running = len(self.equipment_store.running_records())
         self.equipment_badge.configure(text=f"  {running:,} Running Equipment  ")
-        arcs = len(self.arc_store.all_arcs())
+        # Contracts, not rows: Table 1 carries one row per item, so counting
+        # records would report a five-item contract as five ARCs.
+        arcs = len(self.arc_store.documents())
         self.arc_badge.configure(text=f"  {arcs:,} ARC{'s' if arcs != 1 else ''}  ")
 
         for tab in (self.vendor_tab, self.equipment_tab, self.arc_tab):

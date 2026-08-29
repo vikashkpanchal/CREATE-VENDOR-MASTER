@@ -2,8 +2,7 @@
 
 Vendor Master      : Records | Search | Change Log
 Equipment Master   : Records | Search | De-mob | Dashboard | Change Log
-ARC & FO Master    : Dashboard | Structure | ARC Records | FO Records |
-                     Line Items | Change Log
+ARC & FO Master    : Dashboard | Structure | ARC Records | FO Records | Change Log
 
 Sub-tabs are built lazily on first visit - each carries a table or chart
 canvas most sessions never open.
@@ -124,13 +123,14 @@ class EquipmentMasterTab(_SubTabHost):
 
 
 class ArcMasterTab(_SubTabHost):
-    """Dashboard | Structure | ARC Records | FO Records | Line Items | Change Log.
+    """Dashboard | Structure | ARC Records | FO Records | Change Log.
 
     The dashboard comes first deliberately: it answers the questions the data
     is kept for - what is expiring, what has no order against it, where the
     ARC and FO values diverge. Structure shows the hierarchy those figures
     roll up through, and the flat grids are how the underlying rows are
-    imported and edited.
+    imported and edited: ARC Records is Table 1 (ME3L), FO Records is Table 2
+    (framework tracking), each at the line-item granularity its report uses.
     """
 
     def __init__(self, master, arc_store, change_log, on_data_changed=None):
@@ -138,9 +138,7 @@ class ArcMasterTab(_SubTabHost):
             ARC_AUDIT_COLUMNS, ARC_AUDIT_COLUMN_WIDTHS, ARC_AUDIT_WRAPPED_LABELS,
         )
         from vendor_app.gui.audit_tab import AuditLogTab
-        from vendor_app.gui.arc_screens import (
-            ArcLineItemsScreen, ArcRecordsScreen, FoRecordsScreen,
-        )
+        from vendor_app.gui.arc_screens import ArcRecordsScreen, FoRecordsScreen
         from vendor_app.gui.arc_dashboard_tab import ArcDashboardTab
         from vendor_app.gui.arc_structure_tab import ArcStructureTab
 
@@ -155,16 +153,14 @@ class ArcMasterTab(_SubTabHost):
             "FO Records": lambda parent: FoRecordsScreen(
                 parent, arc_store, on_data_changed=on_data_changed
             ),
-            "Line Items": lambda parent: ArcLineItemsScreen(
-                parent, arc_store, on_data_changed=on_data_changed
-            ),
             "Change Log": lambda parent: AuditLogTab(
                 parent, change_log,
                 columns=ARC_AUDIT_COLUMNS,
                 headers=ARC_AUDIT_WRAPPED_LABELS,
                 widths=ARC_AUDIT_COLUMN_WIDTHS,
                 title="ARC & FO Change Log",
-                subtitle="Every amendment, add, edit and delete across ARCs, FOs and "
-                         "line items - all filed against the ARC No.",
+                subtitle="Every amendment, add, edit and delete across contracts, "
+                         "their items and their frame orders - all filed against "
+                         "the purchasing document.",
             ),
         })

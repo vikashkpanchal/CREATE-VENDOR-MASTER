@@ -81,7 +81,7 @@ you can scan in a glance:
 |-----|----------|
 | **Vendor Master** | Records · Search · Change Log |
 | **Equipment Master** | Records · Search · De-mob Equipment · Dashboard · Change Log |
-| **ARC & FO Master** | Dashboard · Structure · ARC Records · FO Records · Line Items · Change Log |
+| **ARC & FO Master** | Dashboard · Structure · ARC Records · FO Records · Change Log |
 | **Communication** | Defective Invoice · Equipment Breakdown |
 
 Every tab and sub-tab is built on first visit, so start-up stays fast.
@@ -182,87 +182,140 @@ recompute from the same filtered set.
 
 ## ARC & FO Master
 
-The contract layer beneath the equipment. Three levels, and value only ever
-flows **up** the tree:
+The contract layer beneath the equipment. Two inputs, both at line-item
+granularity, exactly as the reports produce them:
 
 ```
-ARC  (ARC No)           the master agreement - the key every amendment is filed against
- +-- FO  (FO No)        a sub-part of the ARC; one ARC carries many FOs
-      +-- Line item     the reference rows an FO's value is made of
+Table 1  ARC data (ME3L export)     one row per ITEM of a purchasing document
+Table 2  Framework & contract       one row per ITEM of a frame order
+         tracking
+
+Purchasing Document  (the contract - the key everything is filed against)
+ |  header facts repeat on every item: vendor, validity, target value, release
+ +-- Item                  Table 1: what the contract covers
+ +-- Frame Number (FO)     Table 2: an order placed against the contract
+      +-- Item             Table 2: what that order released
 ```
 
-- **ARC is the master key.** Every FO names exactly one ARC, and every change
-  anywhere in the hierarchy - to a contract, an order or a line - is recorded
-  in one change log against its **ARC No**, which is what makes the ARC the
-  single place an amendment history lives.
-- **Two values per contract, and only one of them is typed.** The ARC carries
-  the **target value released in SAP** as an ordinary field. What has actually
-  been *ordered* against it is never typed: a line's value is the figure
-  entered, or `Quantity x Rate` when that is blank; an FO's total is the sum
-  of its line items, or its own entered figure while it has none; and the
-  **FO Value (Sum)** on an ARC is the aggregate of the FOs beneath it. The gap
-  between the two - **Difference (ARC - FO)** - is the balance still open on
-  the contract. Every rolled-up column is read-only in the grids and a
-  read-out in the dialogs, so an ordered figure can never disagree with the
-  orders it summarises.
-- **Structure** shows the whole tree with each parent's total against the
-  ARC's target (`ordered / target`), so any figure can be traced down to the
-  references behind it. Double-click an ARC or FO row there to open its record.
-- **ARC Records / FO Records / Line Items** are the flat grids, with the same
-  search, unlimited import, Excel-like paste, in-place editing and export as
-  every other master.
-- An FO whose ARC No matches no contract is **not dropped** - it is grouped
-  under "(no ARC on file)" and counted on its own KPI tile, so a typo stays
-  visible instead of silently disappearing.
-- Deleting an ARC removes the FOs and line items beneath it; deleting an FO
-  removes its lines. Both are recorded in the log.
+- **The header value is read once, never summed.** Target Val. (Header)
+  repeats on every item of a contract, and Contract Value repeats again on
+  every row of every frame order under it. Adding those columns up would
+  report a five-item contract as worth five times what it is, so nothing in
+  the app ever does. Per-item money - Released, Actual and Opening Value -
+  *does* add up, because those figures belong to the item rather than to the
+  header.
+- **Counts are of entities, not rows.** An ARC is one purchasing document; an
+  FO is one frame number. A five-item contract is one ARC, and a three-item
+  frame order is one FO.
+- **The purchasing document is the master key.** Every frame order names one
+  contract, and every change anywhere - to a contract item or a frame order
+  item - is recorded in one change log against that document number.
+- **What has been released is never typed.** A frame order's total is the sum
+  of its items; a contract's released value is the sum across its frame
+  orders; and the **difference against Target Val. (Header)** is the balance
+  still open. Those columns are read-only in the grids and read-outs in the
+  dialogs, so a total can never disagree with its own detail.
+- **Release codes read as words.** `R`/`S` and `X`...`XXXXX` are shown decoded
+  ("R - Released", "XXX - Release by R2") in the grids and chosen from a list
+  in the record dialog; the raw code is what gets stored, so a row still
+  matches SAP.
+- **Structure** shows each document with the items it covers and the frame
+  orders placed against it, released against target in one cell.
+- **ARC Records / FO Records** are the flat grids, with the same search,
+  unlimited import, Excel-like paste, in-place editing and export as every
+  other master. A row is keyed on its document and item (or frame number and
+  item), so re-importing the same export updates those rows instead of
+  doubling them.
+- A frame order whose Contract No. matches no document is **not dropped** - it
+  is grouped under "(no contract on file)", counted on its own KPI tile, and
+  still credited to its vendor, so a typo stays visible.
+- Deleting a contract's last item takes its frame orders with it; both are
+  recorded in the log.
 
-### Import columns (ME3L / SAP FO report)
+### Table 1: ARC data (ME3L export)
 
-The two grids carry the columns of the reports the data comes out of, in
-their order, so an untouched download imports without being reshaped first:
-
-| ARC Records (ME3L export) | FO Records (SAP FO report) |
+| Column | Meaning |
 | --- | --- |
-| ARC No | FO No |
-| Vendor Code | ARC No |
-| Vendor Name | Vendor Code |
-| ARC Description | Vendor Name |
-| Validity Start | FO Start Date |
-| Validity End | FO End Date |
-| ARC Value (Target) | FO Value |
-| Plant | Released Value |
-| Purchasing Group | Open Value |
-| Release Status | Plant |
-| | Purchasing Group |
+| Plant | Plant code / identifier |
+| Purchasing Group | Procurement group code |
+| Purchasing Document | PO / Contract No. cum ARC No. |
+| Document Date | Order/creation date (`DD.MM.YYYY`) |
+| Vendor/supplying plant | Vendor code then name, e.g. `100234 Vendor Name` |
+| Item | Line item number (many per document) |
+| Short Text | Material or service description |
+| Validity Per. Start | Contract validity start (`DD.MM.YYYY`) |
+| Validity Period End | Contract validity end (`DD.MM.YYYY`) |
+| Target Val. (Header) | Total planned contract value - repeated across items, **never summed** |
+| Release indicator | `R` released · `S` pending for approval |
+| Release status | `X` buyer · `XX` PV · `XXX` R2 · `XXXX` R4 · `XXXXX` R6 |
+| PO history/release documentation | Follow-on history and documentation text |
 
-Amendment No/Date, Status and Remarks follow on the ARC, and FO Description,
-Status and Remarks on the FO - the app's own fields, simply left blank by a
-raw export. Headers are matched three ways in turn: our own exported labels,
-the SAP names a raw download actually carries (`Agreement No`, `Short Text`,
-`Target Value`, `Valid From/To`, `Purchasing Grp`, `Released Value`, ...),
-and the internal column names. Unrecognised columns are ignored, not rejected.
+The combined **Vendor/supplying plant** column is stored exactly as the export
+writes it; the code and the name are split out for the vendor master and the
+vendor-wise analysis without reshaping the column.
+
+### Table 2: framework & contract tracking
+
+| Column | Meaning |
+| --- | --- |
+| Serial No. | Record identifier |
+| Plant | Plant code / identifier |
+| Contract No. | Contract / ARC document number |
+| Contr.Pur.Group | Contract purchasing group |
+| Header Text | Header-level description / notes |
+| Vendor | Vendor numeric code |
+| Vendor Name | Vendor name |
+| Contract Value | Total contract value |
+| Validity Start | Contract validity start |
+| Validity End | Contract validity end |
+| Requisitioner | Requisitioner name / ID |
+| Frame Numbers | Framework agreement / order number |
+| FO.Valdt.Start | Frame order validity start |
+| FO.Valdt.End | Frame order validity end |
+| Item | Line item number |
+| Frame Pur.Group | Framework agreement purchasing group |
+| Description | Item description |
+| Req.Tracking No. | Purchase requisition tracking number |
+| Released Value | Value released against the contract |
+| Actual Value | Actual utilised / consumed value |
+| Opening Value | Opening balance value |
+
+**Field mapping, Table 1 → Table 2** - these four are the same fact seen from
+the other side, and are treated as header values on both:
+
+| Table 1 | Table 2 |
+| --- | --- |
+| Purchasing Document | Contract No. |
+| Target Val. (Header) | Contract Value |
+| Validity Per. Start | Validity Start |
+| Validity Period End | Validity End |
+
+Headers are matched three ways in turn: the column names above, the
+abbreviations a raw download carries (`Purch.Doc.`, `Doc. Date`, `Target
+Val.`, `Valid From/To`, `Purchasing Grp`, `Rel. Status`, ...), and the
+internal column names. Unrecognised columns are ignored, not rejected.
 
 ### Dashboard
 
 The first sub-tab, and the reason the data is kept. Built from one pass over
-the masters, so the cards, the charts and the tables always agree.
+both tables, so the cards, the charts and the tables always agree.
 
 **KPI cards** - Total ARC · Active ARC · Expired ARC · ARC Without FO ·
 Total ARC Value · Total FO · Total FO Value · ARC Expiring in 30 Days ·
-FO Expiring in 30 Days. They reflow into as many columns as the window fits,
-so none is ever pushed off the edge.
+FO Expiring in 30 Days · Pending Approval (S). They reflow into as many
+columns as the window fits, so none is ever pushed off the edge.
 
 **Sections, in the order the questions get asked:**
 
 | Section | Answers |
 | --- | --- |
-| ARC Expiry Analysis | status donut, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
-| FO Expiry Analysis | the same read on the orders - which need extending |
+| ARC Expiry Analysis | status donut, release position, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
+| FO Expiry Analysis | the same read on the frame orders - which need extending |
 | ARC Without FO | a contract is in place but nothing has been ordered against it, biggest first |
-| ARC vs FO Value Difference | `ARC Value - Sum of FO Values`, ranked by the size of the gap either way |
-| Vendor Analysis | ARC value against FO value per vendor, as paired bars and as a table |
-| High Risk ARC / FO | expiring within 30 days, and (for an ARC) under-ordered against its target |
+| Pending Approval | release indicator `S` - nothing can be ordered against these yet, furthest through the approval chain first |
+| ARC vs FO Value Difference | `Target Val. (Header) - released against it`, ranked by the size of the gap either way |
+| Vendor Analysis | contract value against released value per vendor, as paired bars and as a table |
+| High Risk ARC / FO | expiring within 30 days, and (for a contract) with value still unreleased |
 | Export Reports | every table above in one workbook |
 
 Nineteen analyses back those sections: ARC and FO counts, values, active and
@@ -270,9 +323,10 @@ expired counts, 30/60/90-day expiry buckets for both, ARC Without FO, the ARC
 vs FO gap, the vendor-wise comparison, and the two risk lists.
 
 **Export** writes one `.xlsx`: the headline analyses on a `Summary` sheet,
-then the ARC and FO masters and every dashboard table, each on its own sheet.
-Each section also exports on its own. An empty report still gets its sheet -
-"nothing is expiring" is an answer, and a missing tab reads as a missing one.
+then both masters rolled to their entity and every dashboard table, each on
+its own sheet. Each section also exports on its own. An empty report still
+gets its sheet - "nothing is expiring" is an answer, and a missing tab reads
+as a missing one.
 
 **Dates** are read leniently (`31.03.2027`, `2027-03-31`, `31/03/2027`,
 `31-Mar-2027`, ...). A date that cannot be read is **never guessed at**: the
@@ -351,7 +405,7 @@ vendor_app/
                                delete, search - wired to the change log
   audit.py                    ChangeLog: append-only history for both masters
   equipment.py                EquipmentStore: equipment master, lookups, de-mob
-  arc.py                      ArcStore: ARC -> FO -> line items, with value roll-up
+  arc.py                      ArcStore: Table 1 + Table 2, with entity roll-up
   arc_analytics.py            the 19 ARC/FO analyses: expiry, gaps, risk, vendors
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
@@ -380,10 +434,10 @@ vendor_app/
     equipment_tab.py               equipment search
     demob_tab.py                   bulk de-mob + de-mobbed equipment list
     equipment_dialog.py            full machine record modal
-    arc_screens.py                 ARC / FO / line-item records screens
-    arc_structure_tab.py           the ARC -> FO -> line hierarchy view
+    arc_screens.py                 the Table 1 and Table 2 records screens
+    arc_structure_tab.py           the contract -> item / frame order view
     arc_dashboard_tab.py           ARC & FO management dashboard
-    arc_dialogs.py                 full ARC and FO record modals
+    arc_dialogs.py                 contract-item and frame-order-item modals
     dashboard_tab.py               interactive equipment analytics
     audit_tab.py                   change log screen (serves both masters)
     communication_tab.py           the two email flows

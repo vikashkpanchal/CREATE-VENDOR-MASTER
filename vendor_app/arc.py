@@ -1,52 +1,59 @@
-"""ARC & FO master: rate contracts, the orders beneath them, and their lines.
+"""ARC & FO master: contracts, the frame orders under them, and their items.
 
-The hierarchy is the point of this module:
+Two inputs, at line-item granularity, exactly as the reports produce them:
 
-    ARC  (arc_no)          the master agreement - the key every amendment is
-     |                     filed against
-     +-- FO  (fo_no)       a sub-part of the ARC; one ARC carries many FOs
-          +-- line item    the reference rows an FO's value is made of
+    Table 1  ARC data (ME3L)          one row per ITEM of a purchasing document
+    Table 2  Framework tracking       one row per ITEM of a frame order
 
-Value only ever flows UP that tree, never down and never sideways:
+    Purchasing Document  (the contract, the key everything is filed against)
+     |  header facts repeat on every item: vendor, validity, target value,
+     |  release indicator and status
+     +-- Item                     Table 1: what the contract covers
+     +-- Frame Number  (FO)       Table 2: an order placed against the contract
+          +-- Item                Table 2: what that order released
 
-    line value  = the figure entered, or quantity x rate when it is blank
-    FO total    = the sum of its line items, or the FO's own entered value
-                  when it has no lines yet
-    ARC value   = the sum of the FO totals beneath it
+The one rule everything else follows: **a repeated header value is read
+once per document, never summed across its duplicates.** Target Val.
+(Header) appears on every item of a contract; adding those up would report
+a contract worth five times what it is. Per-item money - Released, Actual
+and Opening Value - does add up within its frame order, because those
+figures belong to the item, not to the header.
 
-So "ARC value" is always the final aggregated value of that ARC's FOs. It is
-derived on read and never stored, which means it cannot drift out of step
-with the orders it is supposed to summarise.
+Every roll-up is derived on read and never stored, so no total can drift
+out of step with the rows it came from.
 """
 
 import os
 import re
 import threading
+from collections import OrderedDict
 from datetime import date, datetime
 
 import pandas as pd
 
 from vendor_app.config import (
     ARC_FILE,
+    ARC_HEADER_KEYS,
     ARC_KEYS,
+    ARC_KEY_FIELDS,
     ARC_LABELS,
-    ARC_LINE_ITEM_FILE,
-    ARC_LINE_KEYS,
-    ARC_LINE_LABELS,
-    ARC_STATUS_DEFAULT,
+    ARC_LEGACY_COLUMNS,
     DATA_DIR,
     FO_FILE,
+    FO_ITEM_VALUE_KEYS,
     FO_KEYS,
+    FO_KEY_FIELDS,
     FO_LABELS,
-    FO_STATUS_DEFAULT,
+    FO_LEGACY_COLUMNS,
 )
 from vendor_app.validators import ValidationError, normalize
 
 _NUMBER_RE = re.compile(r"[^0-9.\-]")
+_VENDOR_RE = re.compile(r"^(\d+)\s*[-/:.]?\s*(.*)$")
 
 
 def parse_amount(value) -> float:
-    """Read a money/quantity cell leniently.
+    """Read a money cell leniently.
 
     Figures arrive pasted out of Excel, so '1,20,000', '₹ 45000.50' and
     '45000' all have to add up to the same thing. Anything unreadable
@@ -73,9 +80,39 @@ def format_amount(value: float) -> str:
     return f"{value:,.2f}"
 
 
-# Dates arrive from ME3L/SAP exports and from hand-typed cells alike, so
-# every shape either of those produces has to read. SAP's own dotted format
-# leads because that is what an untouched download contains.
+def display_amount(text) -> str:
+    """A money cell tidied with thousands separators for the grid.
+
+    Only when the cell is plainly a number. Anything carrying letters - a
+    note, a unit, "1.5 Cr" - is shown exactly as it was typed, because
+    rewriting it would turn a figure into something it may not mean. The
+    stored value is never changed by this; it is a display pass only.
+    """
+    raw = normalize(text)
+    if not raw or any(ch.isalpha() for ch in raw):
+        return raw
+    value = parse_amount(raw)
+    return format_amount(value) if value else raw
+
+
+def split_vendor(text):
+    """'100234 Vendor Name' -> ('100234', 'Vendor Name').
+
+    Table 1 carries the code and the name in one column. They are split for
+    the vendor master and the vendor-wise analysis, while the column itself
+    keeps the text exactly as the export wrote it.
+    """
+    raw = normalize(text)
+    if not raw:
+        return ("", "")
+    match = _VENDOR_RE.match(raw)
+    if match:
+        return (match.group(1), match.group(2).strip())
+    return ("", raw)
+
+
+# Dates arrive as DD.MM.YYYY from SAP and in whatever shape a person types.
+# The SAP format leads because that is what an untouched download contains.
 DATE_FORMATS = (
     "%d.%m.%Y", "%d.%m.%y",
     "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
@@ -101,31 +138,16 @@ def parse_date(value):
     return None
 
 
-def days_until(value, today=None) -> int:
+def days_until(value, today=None):
     """Days from `today` to `value`; negative once it has passed.
 
-    Returns None when the date cannot be read, so callers can keep those
-    rows out of the expiry buckets instead of bucketing them wrongly.
+    None when the date cannot be read, so callers can keep those rows out of
+    the expiry buckets instead of bucketing them wrongly.
     """
     end = parse_date(value)
     if end is None:
         return None
     return (end - (today or date.today())).days
-
-
-def display_amount(text) -> str:
-    """A money cell tidied with thousands separators for the grid.
-
-    Only when the cell is plainly a number. Anything carrying letters - a
-    note, a unit, "1.5 Cr" - is shown exactly as it was typed, because
-    rewriting it would turn a figure into something it may not mean. The
-    stored value is never changed by this; it is a display pass only.
-    """
-    raw = normalize(text)
-    if not raw or any(ch.isalpha() for ch in raw):
-        return raw
-    value = parse_amount(raw)
-    return format_amount(value) if value else raw
 
 
 def _clean(raw: dict, keys) -> dict:
@@ -139,115 +161,152 @@ def is_blank(raw: dict, keys) -> bool:
 # --------------------------------------------------------------- validation --
 def validate_arc(raw: dict) -> dict:
     cleaned = _clean(raw, ARC_KEYS)
-    if not cleaned["arc_no"]:
-        raise ValidationError(ARC_LABELS["arc_no"], "is required - it is the master key")
-    if not cleaned["status"]:
-        cleaned["status"] = ARC_STATUS_DEFAULT
+    if not cleaned["purchasing_document"]:
+        raise ValidationError(
+            ARC_LABELS["purchasing_document"],
+            "is required - it is the contract every item and frame order hangs off",
+        )
     return cleaned
 
 
 def validate_fo(raw: dict) -> dict:
     cleaned = _clean(raw, FO_KEYS)
-    if not cleaned["fo_no"]:
-        raise ValidationError(FO_LABELS["fo_no"], "is required")
-    if not cleaned["arc_no"]:
+    if not cleaned["frame_numbers"]:
+        raise ValidationError(FO_LABELS["frame_numbers"], "is required")
+    if not cleaned["contract_no"]:
         raise ValidationError(
-            FO_LABELS["arc_no"], "is required - every FO belongs to exactly one ARC"
-        )
-    if not cleaned["status"]:
-        cleaned["status"] = FO_STATUS_DEFAULT
-    return cleaned
-
-
-def validate_line(raw: dict) -> dict:
-    cleaned = _clean(raw, ARC_LINE_KEYS)
-    if not cleaned["fo_no"]:
-        raise ValidationError(
-            ARC_LINE_LABELS["fo_no"], "is required - a line item references one FO"
-        )
-    if not cleaned["line_no"] and not cleaned["item_code"]:
-        raise ValidationError(
-            ARC_LINE_LABELS["line_no"], "or Item Code is required to identify the line"
+            FO_LABELS["contract_no"],
+            "is required - a frame order is always placed against a contract",
         )
     return cleaned
-
-
-def line_value(record: dict) -> float:
-    """A line's value: the figure entered, else quantity x rate."""
-    entered = normalize(record.get("line_value", ""))
-    if entered:
-        return parse_amount(entered)
-    return parse_amount(record.get("quantity", "")) * parse_amount(record.get("rate", ""))
 
 
 class _Table:
-    """One CSV-backed list of dicts with a single-column key.
+    """One CSV-backed list of dicts, keyed on one or more columns.
 
-    Kept deliberately small: three of these, plus the roll-up rules in
-    ArcStore, is the whole module.
+    Both tables are line-item level, so the key is composite: a document
+    plus its item, a frame number plus its item. Re-importing the same
+    export therefore updates the same rows instead of doubling them.
     """
 
-    def __init__(self, path, keys, key_field, validator):
+    def __init__(self, path, keys, key_fields, validator, legacy=None, legacy_fn=None):
         self.path = path
         self.keys = list(keys)
-        self.key_field = key_field
+        self.key_fields = tuple(key_fields)
         self.validate = validator
+        self.legacy = dict(legacy or {})
+        # For a legacy column that has no single new home - two old columns
+        # folded into one, say - a store may pass a function instead.
+        self.legacy_fn = legacy_fn
         self.records = []
         self.load()
 
+    # ------------------------------------------------------------- keys --
+    def key_of(self, record):
+        return tuple(normalize(record.get(k, "")).lower() for k in self.key_fields)
+
+    @staticmethod
+    def row_id(key):
+        return "␟".join(key)
+
+    @staticmethod
+    def key_from_id(row_id):
+        return tuple(row_id.split("␟"))
+
+    # ------------------------------------------------------------- disk --
     def load(self):
         os.makedirs(DATA_DIR, exist_ok=True)
         self.records = []
-        if os.path.exists(self.path):
-            frame = pd.read_csv(self.path, dtype=str, keep_default_na=False)
-            for _, row in frame.iterrows():
-                record = {k: normalize(row.get(k, "")) for k in self.keys}
-                if any(record.values()):
-                    self.records.append(record)
+        if not os.path.exists(self.path):
+            return
+        frame = pd.read_csv(self.path, dtype=str, keep_default_na=False)
+        for _, row in frame.iterrows():
+            record = {k: normalize(row.get(k, "")) for k in self.keys}
+            # A store written before the columns were renamed still loads:
+            # an old column fills the new one when the new one is empty.
+            for old, new in self.legacy.items():
+                if not record.get(new) and normalize(row.get(old, "")):
+                    record[new] = normalize(row.get(old, ""))
+            if self.legacy_fn is not None:
+                self.legacy_fn(record, row)
+            if any(record.values()):
+                self.records.append(record)
 
     def save(self):
         os.makedirs(DATA_DIR, exist_ok=True)
         pd.DataFrame(self.records, columns=self.keys).to_csv(self.path, index=False)
 
-    def find(self, key_value):
-        needle = normalize(key_value).lower()
-        if not needle:
+    def find(self, key):
+        """`key` is a tuple of the key columns, or a row id string."""
+        if isinstance(key, str):
+            key = self.key_from_id(key)
+        needle = tuple(normalize(part).lower() for part in key)
+        if not any(needle):
             return None
         for record in self.records:
-            if record.get(self.key_field, "").lower() == needle:
+            if self.key_of(record) == needle:
                 return record
         return None
 
+    def group_by(self, field):
+        """Rows grouped by one column, in first-seen order."""
+        grouped = OrderedDict()
+        for record in self.records:
+            grouped.setdefault(normalize(record.get(field, "")), []).append(record)
+        return grouped
+
 
 class ArcStore:
-    """The ARC master, its FOs and their line items, with value roll-up.
+    """Table 1 and Table 2, with every per-contract figure derived on read.
 
-    A single store owns all three levels because they are only ever
-    meaningful together - an FO without its ARC, or a value without the
-    lines behind it, is not something the app should be able to represent.
+    One store owns both because they are only meaningful together: a frame
+    order without its contract has nothing to be measured against, and a
+    contract without its orders cannot say how much of itself is used.
     """
 
-    def __init__(self, arc_path=ARC_FILE, fo_path=FO_FILE, line_path=ARC_LINE_ITEM_FILE,
-                 change_log=None, vendor_store=None):
+    def __init__(self, arc_path=ARC_FILE, fo_path=FO_FILE, change_log=None,
+                 vendor_store=None):
         self.change_log = change_log
-        # A vendor named on an ARC or FO is created in the vendor master the
-        # same way an equipment row creates one, so the masters stay in step.
+        # A vendor named on a contract or a frame order is created in the
+        # vendor master the same way an equipment row creates one.
         self.vendor_store = vendor_store
         self._lock = threading.RLock()
-        self.arcs = _Table(arc_path, ARC_KEYS, "arc_no", validate_arc)
-        self.fos = _Table(fo_path, FO_KEYS, "fo_no", validate_fo)
-        self.lines = _Table(line_path, ARC_LINE_KEYS, "line_no", validate_line)
+        self.arcs = _Table(ARC_FILE if arc_path is None else arc_path,
+                           ARC_KEYS, ARC_KEY_FIELDS, validate_arc, ARC_LEGACY_COLUMNS,
+                           legacy_fn=self._legacy_vendor)
+        self.fos = _Table(FO_FILE if fo_path is None else fo_path,
+                          FO_KEYS, FO_KEY_FIELDS, validate_fo, FO_LEGACY_COLUMNS)
+
+    @staticmethod
+    def _legacy_vendor(record, row):
+        """An older store kept the vendor code and name in two columns; this
+        table has the one combined column the export uses, so they are folded
+        back together rather than dropped."""
+        if record.get("vendor_supplying_plant"):
+            return
+        code = normalize(row.get("vendor_code", ""))
+        name = normalize(row.get("vendor_name", ""))
+        combined = " ".join(part for part in (code, name) if part)
+        if combined:
+            record["vendor_supplying_plant"] = combined
 
     # ----------------------------------------------------------- vendors --
+    @staticmethod
+    def vendor_of(record):
+        """(code, name) for a row of either table."""
+        if "vendor_supplying_plant" in record:
+            return split_vendor(record.get("vendor_supplying_plant", ""))
+        return (normalize(record.get("vendor", "")),
+                normalize(record.get("vendor_name", "")))
+
     def _sync_vendor(self, record):
         if self.vendor_store is None:
             return None
-        code = normalize(record.get("vendor_code", ""))
+        code, name = self.vendor_of(record)
         if not code or not code.isdigit():
             return None
         if self.vendor_store.get(code) is not None:
             return None
-        name = normalize(record.get("vendor_name", ""))
         try:
             self.vendor_store.upsert({"vendor_code": code, "vendor_name": name})
         except ValidationError:
@@ -261,154 +320,200 @@ class ArcStore:
     def all_fos(self):
         return list(self.fos.records)
 
-    def all_lines(self):
-        return list(self.lines.records)
+    def items_for_document(self, document):
+        needle = normalize(document).lower()
+        return [r for r in self.arcs.records
+                if normalize(r.get("purchasing_document", "")).lower() == needle]
 
-    def fos_for_arc(self, arc_no):
-        needle = normalize(arc_no).lower()
-        return [f for f in self.fos.records if f.get("arc_no", "").lower() == needle]
+    def fos_for_document(self, document):
+        needle = normalize(document).lower()
+        return [r for r in self.fos.records
+                if normalize(r.get("contract_no", "")).lower() == needle]
 
-    def lines_for_fo(self, fo_no):
-        needle = normalize(fo_no).lower()
-        return [l for l in self.lines.records if l.get("fo_no", "").lower() == needle]
+    def items_for_frame(self, frame):
+        needle = normalize(frame).lower()
+        return [r for r in self.fos.records
+                if normalize(r.get("frame_numbers", "")).lower() == needle]
+
+    def frames_for_document(self, document):
+        """The distinct frame numbers ordered against a contract."""
+        seen = OrderedDict()
+        for row in self.fos_for_document(document):
+            seen.setdefault(normalize(row.get("frame_numbers", "")), None)
+        return [f for f in seen if f]
 
     # --------------------------------------------------------- roll-ups --
-    def fo_total(self, fo_no) -> float:
-        """An FO's effective value: its line items, or its own figure when
-        it has none. Lines are the reference, so once they exist they win."""
-        lines = self.lines_for_fo(fo_no)
-        if lines:
-            return sum(line_value(l) for l in lines)
-        record = self.fos.find(fo_no)
-        return parse_amount(record.get("fo_value", "")) if record else 0.0
+    def documents(self):
+        """One entry per purchasing document, header read once.
 
-    def fo_value_for_arc(self, arc_no) -> float:
-        """What has actually been ordered against an ARC: the sum of its FOs."""
-        return sum(self.fo_total(f.get("fo_no", "")) for f in self.fos_for_arc(arc_no))
-
-    def arc_target_value(self, arc_no) -> float:
-        """The ARC's own released value, as it came out of ME3L."""
-        record = self.arcs.find(arc_no)
-        return parse_amount(record.get("arc_value", "")) if record else 0.0
-
-    def value_gap(self, arc_no) -> float:
-        """ARC Value - Sum of FO Values: the balance still open on the contract.
-
-        Positive means budget released but not yet ordered against; negative
-        means the FOs have over-run the contract, which is the alarming case.
+        The header fields are taken from the first row that carries them
+        rather than from row zero blindly - an export can leave a repeated
+        cell blank on continuation rows, and the contract still has one
+        target value, one validity and one release state.
         """
-        return self.arc_target_value(arc_no) - self.fo_value_for_arc(arc_no)
+        grouped = OrderedDict()
+        for record in self.arcs.records:
+            document = normalize(record.get("purchasing_document", ""))
+            grouped.setdefault(document, []).append(record)
 
+        documents = OrderedDict()
+        for document, rows in grouped.items():
+            header = {}
+            for key in ARC_HEADER_KEYS:
+                header[key] = next(
+                    (normalize(r.get(key, "")) for r in rows if normalize(r.get(key, ""))),
+                    "",
+                )
+            documents[document] = {"document": document, "header": header, "items": rows}
+        return documents
+
+    def header_for(self, document):
+        entry = self.documents().get(normalize(document))
+        return entry["header"] if entry else {}
+
+    def target_value(self, document) -> float:
+        """The contract's planned value, taken ONCE from the header.
+
+        Target Val. (Header) repeats on every item of the document, so this
+        deliberately reads a single occurrence. Summing the column is the
+        one mistake that would silently multiply every contract's worth.
+        """
+        return parse_amount(self.header_for(document).get("target_value", ""))
+
+    def frame_released(self, frame) -> float:
+        """What one frame order has released: its items DO add up."""
+        return sum(parse_amount(r.get("released_value", ""))
+                   for r in self.items_for_frame(frame))
+
+    def frame_value(self, frame, key) -> float:
+        return sum(parse_amount(r.get(key, "")) for r in self.items_for_frame(frame))
+
+    def released_against(self, document) -> float:
+        """Released against a contract: every item of every frame order on it."""
+        return sum(parse_amount(r.get("released_value", ""))
+                   for r in self.fos_for_document(document))
+
+    def value_gap(self, document) -> float:
+        """Target Val. (Header) - what has been released against it.
+
+        Positive means contract value still to be ordered; negative means
+        the frame orders have over-run the contract, which is the alarming
+        case and is why the sign is kept rather than shown as a magnitude.
+        """
+        return self.target_value(document) - self.released_against(document)
+
+    # ------------------------------------------------------- grid rows --
     def arc_row(self, record: dict) -> dict:
-        """An ARC record plus its derived columns, ready for the grid."""
-        arc_no = record.get("arc_no", "")
+        """A Table 1 row plus its document-level derived columns.
+
+        Those repeat down the items of a document exactly the way Target
+        Val. (Header) does in the source report - the same fact about the
+        same contract, shown on each of its rows.
+        """
+        document = normalize(record.get("purchasing_document", ""))
         enriched = dict(record)
-        enriched["arc_value"] = display_amount(record.get("arc_value", ""))
-        enriched["fo_count"] = str(len(self.fos_for_arc(arc_no)))
-        enriched["fo_value_total"] = format_amount(self.fo_value_for_arc(arc_no))
-        enriched["value_difference"] = format_amount(self.value_gap(arc_no))
+        enriched["target_value"] = display_amount(record.get("target_value", ""))
+        enriched["frame_orders"] = str(len(self.frames_for_document(document)))
+        enriched["ordered_value"] = format_amount(self.released_against(document))
+        enriched["value_difference"] = format_amount(self.value_gap(document))
         return enriched
 
     def fo_row(self, record: dict) -> dict:
-        fo_no = record.get("fo_no", "")
+        frame = normalize(record.get("frame_numbers", ""))
         enriched = dict(record)
-        for key in ("fo_value", "released_value", "open_value"):
+        for key in ["contract_value"] + FO_ITEM_VALUE_KEYS:
             enriched[key] = display_amount(record.get(key, ""))
-        enriched["line_count"] = str(len(self.lines_for_fo(fo_no)))
-        enriched["fo_total"] = format_amount(self.fo_total(fo_no))
-        return enriched
-
-    def line_row(self, record: dict) -> dict:
-        enriched = dict(record)
-        if not normalize(enriched.get("line_value", "")):
-            # Show what the line is actually worth, even when only the
-            # quantity and rate were entered.
-            enriched["line_value"] = format_amount(line_value(record))
+        enriched["fo_items"] = str(len(self.items_for_frame(frame)))
+        enriched["fo_released_total"] = format_amount(self.frame_released(frame))
         return enriched
 
     def summary(self) -> dict:
-        arcs = self.all_arcs()
-        fo_value = sum(self.fo_value_for_arc(a.get("arc_no", "")) for a in arcs)
-        target = sum(parse_amount(a.get("arc_value", "")) for a in arcs)
+        documents = self.documents()
+        target = sum(parse_amount(e["header"].get("target_value", ""))
+                     for e in documents.values())
+        released = sum(parse_amount(r.get("released_value", ""))
+                       for r in self.fos.records)
+        known = {d.lower() for d in documents}
+        orphan_frames = {
+            normalize(r.get("frame_numbers", ""))
+            for r in self.fos.records
+            if normalize(r.get("contract_no", "")).lower() not in known
+        }
+        frames = {normalize(r.get("frame_numbers", "")) for r in self.fos.records}
         return {
-            "arcs": len(arcs),
-            "fos": len(self.fos.records),
-            "lines": len(self.lines.records),
-            "value": fo_value,
+            "arcs": len(documents),
+            "arc_items": len(self.arcs.records),
+            "fos": len({f for f in frames if f}),
+            "fo_items": len(self.fos.records),
             "target_value": target,
-            "gap": target - fo_value,
-            "orphan_fos": len([
-                f for f in self.fos.records
-                if self.arcs.find(f.get("arc_no", "")) is None
-            ]),
+            "value": released,
+            "gap": target - released,
+            "orphan_fos": len({f for f in orphan_frames if f}),
         }
 
     def structure(self) -> list:
-        """The full ARC -> FO -> line tree, in display order.
+        """The contract -> (items, frame orders -> items) tree, in display order.
 
-        FOs whose ARC No matches no ARC record are grouped under a synthetic
-        "(no ARC on file)" node rather than being dropped - an order with a
-        mistyped ARC has to stay visible or it silently disappears.
+        A frame order whose Contract No. matches no document is grouped
+        under a synthetic "(no contract on file)" node rather than being
+        dropped - an order against a mistyped contract has to stay visible.
         """
         tree = []
-        for arc in self.arcs.records:
-            arc_no = arc.get("arc_no", "")
-            fos = []
-            for fo in self.fos_for_arc(arc_no):
-                fo_no = fo.get("fo_no", "")
-                fos.append({
-                    "record": fo,
-                    "total": self.fo_total(fo_no),
-                    "lines": [
-                        {"record": l, "value": line_value(l)}
-                        for l in self.lines_for_fo(fo_no)
-                    ],
-                })
+        for document, entry in self.documents().items():
             tree.append({
-                "record": arc,
-                "fos": fos,
-                "total": self.fo_value_for_arc(arc_no),
-                "target": parse_amount(arc.get("arc_value", "")),
+                "document": document,
+                "header": entry["header"],
+                "items": entry["items"],
+                "frames": self._frame_nodes(self.fos_for_document(document)),
+                "target": parse_amount(entry["header"].get("target_value", "")),
+                "released": self.released_against(document),
             })
 
-        known = {a.get("arc_no", "").lower() for a in self.arcs.records}
-        orphans = [f for f in self.fos.records if f.get("arc_no", "").lower() not in known]
+        known = {d.lower() for d in self.documents()}
+        orphans = [r for r in self.fos.records
+                   if normalize(r.get("contract_no", "")).lower() not in known]
         if orphans:
-            fos = []
-            for fo in orphans:
-                fo_no = fo.get("fo_no", "")
-                fos.append({
-                    "record": fo,
-                    "total": self.fo_total(fo_no),
-                    "lines": [
-                        {"record": l, "value": line_value(l)}
-                        for l in self.lines_for_fo(fo_no)
-                    ],
-                })
             tree.append({
-                "record": {"arc_no": "(no ARC on file)", "arc_description":
-                           "FOs whose ARC No does not match any ARC record"},
-                "fos": fos,
-                "total": sum(f["total"] for f in fos),
+                "document": "(no contract on file)",
+                "header": {"short_text": "Frame orders whose Contract No. matches "
+                                         "no purchasing document"},
+                "items": [],
+                "frames": self._frame_nodes(orphans),
                 "target": 0.0,
+                "released": sum(parse_amount(r.get("released_value", "")) for r in orphans),
                 "orphan": True,
             })
         return tree
 
-    # ------------------------------------------------------------ writes --
-    def _log(self, arc_no, reference, action, details):
-        if self.change_log is not None and details:
-            self.change_log.record(arc_no, reference, action, details)
+    @staticmethod
+    def _frame_nodes(rows):
+        grouped = OrderedDict()
+        for row in rows:
+            grouped.setdefault(normalize(row.get("frame_numbers", "")), []).append(row)
+        return [
+            {
+                "frame": frame,
+                "items": items,
+                "released": sum(parse_amount(r.get("released_value", "")) for r in items),
+                "header": items[0],
+            }
+            for frame, items in grouped.items()
+        ]
 
-    def _upsert(self, table, raw, level, arc_of, name_of, labels):
-        """Shared insert-or-merge for all three levels.
+    # ------------------------------------------------------------ writes --
+    def _log(self, document, reference, action, details):
+        if self.change_log is not None and details:
+            self.change_log.record(document, reference, action, details)
+
+    def _upsert(self, table, raw, level, document_of, reference_of, labels):
+        """Shared insert-or-merge for both tables.
 
         Same cell-level merge rule as the other masters: a blank incoming
         cell never overwrites what is already stored.
         """
         cleaned = table.validate(raw)
         with self._lock:
-            existing = table.find(cleaned[table.key_field])
+            existing = table.find(table.key_of(cleaned))
             if existing is not None:
                 changes = [
                     f"{labels[k]}: '{existing.get(k, '')}' -> '{cleaned[k]}'"
@@ -428,34 +533,30 @@ class ArcStore:
             created = self._sync_vendor(target)
 
         self._log(
-            arc_of(target), name_of(target),
+            document_of(target), reference_of(target),
             "Added" if result == "added" else "Updated", details,
         )
         if created:
             self._log(
-                arc_of(target), created[0], "Vendor Added",
-                f"Vendor {created[0]} auto-created in the vendor master from an {level}",
+                document_of(target), created[0], "Vendor Added",
+                f"Vendor {created[0]} auto-created in the vendor master from a {level}",
             )
         return result
 
     def upsert_arc(self, raw):
         return self._upsert(
-            self.arcs, raw, "ARC",
-            lambda r: r.get("arc_no", ""), lambda r: r.get("arc_description", ""), ARC_LABELS,
+            self.arcs, raw, "contract item",
+            lambda r: r.get("purchasing_document", ""),
+            lambda r: f"Item {r.get('item', '')}".strip(),
+            ARC_LABELS,
         )
 
     def upsert_fo(self, raw):
         return self._upsert(
-            self.fos, raw, "FO",
-            lambda r: r.get("arc_no", ""), lambda r: f"FO {r.get('fo_no', '')}", FO_LABELS,
-        )
-
-    def upsert_line(self, raw):
-        return self._upsert(
-            self.lines, raw, "line item",
-            lambda r: r.get("arc_no", ""),
-            lambda r: f"FO {r.get('fo_no', '')} line {r.get('line_no', '')}",
-            ARC_LINE_LABELS,
+            self.fos, raw, "frame order item",
+            lambda r: r.get("contract_no", ""),
+            lambda r: f"{r.get('frame_numbers', '')} item {r.get('item', '')}".strip(),
+            FO_LABELS,
         )
 
     def _bulk(self, table, rows, upsert, progress=None):
@@ -481,25 +582,27 @@ class ArcStore:
     def bulk_upsert_fos(self, rows, progress=None):
         return self._bulk(self.fos, rows, self.upsert_fo, progress)
 
-    def bulk_upsert_lines(self, rows, progress=None):
-        return self._bulk(self.lines, rows, self.upsert_line, progress)
-
     # ------------------------------------------------------------ update --
-    def update_arc_field(self, arc_no, key, value):
-        return self._update(self.arcs, arc_no, key, value, "arc_no", ARC_LABELS,
-                            lambda r: r.get("arc_no", ""))
+    def update_arc_field(self, row_id, key, value):
+        return self._update(self.arcs, row_id, key, value, ARC_LABELS,
+                            lambda r: r.get("purchasing_document", ""),
+                            lambda r: f"Item {r.get('item', '')}".strip())
 
-    def update_fo_field(self, fo_no, key, value):
-        return self._update(self.fos, fo_no, key, value, "fo_no", FO_LABELS,
-                            lambda r: r.get("arc_no", ""))
+    def update_fo_field(self, row_id, key, value):
+        return self._update(self.fos, row_id, key, value, FO_LABELS,
+                            lambda r: r.get("contract_no", ""),
+                            lambda r: f"{r.get('frame_numbers', '')} "
+                                      f"item {r.get('item', '')}".strip())
 
-    def _update(self, table, key_value, key, value, pk, labels, arc_of):
-        if key == pk:
-            raise ValidationError(labels[pk], "is the key and cannot be changed here")
+    def _update(self, table, row_id, key, value, labels, document_of, reference_of):
+        if key in table.key_fields:
+            raise ValidationError(
+                labels[key], "identifies the row and cannot be changed here"
+            )
         with self._lock:
-            record = table.find(key_value)
+            record = table.find(row_id)
             if record is None:
-                raise ValidationError(labels[pk], "no longer exists - refresh and try again")
+                raise ValidationError("This row", "no longer exists - refresh and try again")
             before = record.get(key, "")
             candidate = dict(record)
             candidate[key] = normalize(value)
@@ -507,85 +610,66 @@ class ArcStore:
             record.update(cleaned)
             table.save()
         self._log(
-            arc_of(record), record.get(pk, ""), "Updated",
+            document_of(record), reference_of(record), "Updated",
             f"{labels.get(key, key)}: '{before}' -> '{record.get(key, '')}'",
         )
         return record
 
-    def update_line_field(self, record, key, value):
-        """Line items have no single stable key, so the row object is passed."""
-        if record is None:
-            raise ValidationError("Line item", "no longer exists - refresh and try again")
-        with self._lock:
-            before = record.get(key, "")
-            candidate = dict(record)
-            candidate[key] = normalize(value)
-            cleaned = validate_line(candidate)
-            record.update(cleaned)
-            self.lines.save()
-        self._log(
-            record.get("arc_no", ""),
-            f"FO {record.get('fo_no', '')} line {record.get('line_no', '')}",
-            "Updated", f"{ARC_LINE_LABELS.get(key, key)}: '{before}' -> '{record.get(key, '')}'",
-        )
-        return record
-
     # ------------------------------------------------------------ delete --
-    def delete_arc(self, arc_no, cascade=True):
-        """Remove an ARC. Its FOs and their lines go with it by default -
-        an order under no contract has nothing to be an amendment of."""
+    def delete_arc(self, row_id):
+        """Remove one contract item. The last item of a document takes the
+        document's frame orders with it - an order against a contract that
+        no longer exists has nothing to be measured against."""
         with self._lock:
-            record = self.arcs.find(arc_no)
+            record = self.arcs.find(row_id)
             if record is None:
                 return False
+            document = normalize(record.get("purchasing_document", ""))
             self.arcs.records.remove(record)
-            removed_fos = removed_lines = 0
-            if cascade:
-                for fo in self.fos_for_arc(arc_no):
-                    removed_lines += self._drop_lines(fo.get("fo_no", ""))
-                    self.fos.records.remove(fo)
-                    removed_fos += 1
+            removed_frames = 0
+            if not self.items_for_document(document):
+                for row in self.fos_for_document(document):
+                    self.fos.records.remove(row)
+                    removed_frames += 1
                 self.fos.save()
-                self.lines.save()
             self.arcs.save()
+        detail = f"Item {record.get('item', '')} deleted"
+        if removed_frames:
+            detail += (f"; last item of the contract, so {removed_frames} "
+                       "frame order row(s) went with it")
+        self._log(document, f"Item {record.get('item', '')}".strip(), "Deleted", detail)
+        return True
+
+    def delete_document(self, document):
+        """Remove a whole purchasing document: its items and its orders."""
+        with self._lock:
+            items = self.items_for_document(document)
+            frames = self.fos_for_document(document)
+            if not items and not frames:
+                return False
+            for row in items:
+                self.arcs.records.remove(row)
+            for row in frames:
+                self.fos.records.remove(row)
+            self.arcs.save()
+            self.fos.save()
         self._log(
-            arc_no, record.get("arc_description", ""), "Deleted",
-            f"ARC deleted along with {removed_fos} FO(s) and {removed_lines} line item(s)",
+            document, "", "Deleted",
+            f"Contract deleted with {len(items)} item(s) and {len(frames)} "
+            "frame order row(s)",
         )
         return True
 
-    def _drop_lines(self, fo_no):
-        lines = self.lines_for_fo(fo_no)
-        for line in lines:
-            self.lines.records.remove(line)
-        return len(lines)
-
-    def delete_fo(self, fo_no):
+    def delete_fo(self, row_id):
         with self._lock:
-            record = self.fos.find(fo_no)
+            record = self.fos.find(row_id)
             if record is None:
                 return False
-            removed = self._drop_lines(fo_no)
             self.fos.records.remove(record)
             self.fos.save()
-            self.lines.save()
         self._log(
-            record.get("arc_no", ""), f"FO {fo_no}", "Deleted",
-            f"FO deleted along with {removed} line item(s)",
-        )
-        return True
-
-    def delete_line(self, record):
-        if record is None:
-            return False
-        with self._lock:
-            if record not in self.lines.records:
-                return False
-            self.lines.records.remove(record)
-            self.lines.save()
-        self._log(
-            record.get("arc_no", ""),
-            f"FO {record.get('fo_no', '')} line {record.get('line_no', '')}",
-            "Deleted", "Line item deleted",
+            record.get("contract_no", ""),
+            f"{record.get('frame_numbers', '')} item {record.get('item', '')}".strip(),
+            "Deleted", "Frame order item deleted",
         )
         return True

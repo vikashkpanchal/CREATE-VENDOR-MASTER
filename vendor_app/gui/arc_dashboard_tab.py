@@ -3,18 +3,21 @@
 Laid out in the order the questions get asked:
 
     KPI cards
-    ARC Expiry Analysis          status split, expiry trend, what expires in 30 days
-    FO Expiry Analysis           the same, for the orders
+    ARC Expiry Analysis          status, release position, trend, what expires in 30 days
+    FO Expiry Analysis           the same, for the frame orders
     ARC Without FO               a contract with nothing ordered against it
-    ARC vs FO Value Difference   ARC 10 Cr - FO 6 Cr leaves 4 Cr still to order
-    Vendor Analysis              contracts vs orders, per vendor
+    Pending Approval             release indicator S - nothing can be ordered yet
+    ARC vs FO Value Difference   target 10 Cr - released 6 Cr leaves 4 Cr to order
+    Vendor Analysis              contracts vs frame orders, per vendor
     High Risk                    expiring soon and under-ordered
     Export Reports               every table above, as one workbook
 
 Everything on screen comes from one ArcAnalysis built at refresh, so the
 cards, the charts and the tables can never disagree with each other. Nothing
-is computed twice and nothing is stored - the dashboard is a read of the ARC
-and FO masters as they stand right now.
+is computed twice and nothing is stored - the dashboard is a read of Table 1 and
+Table 2 as they stand right now, rolled to the entity each figure belongs
+to: a contract is one purchasing document, a frame order is one frame
+number, and a repeated header value is never counted or summed twice.
 """
 
 from datetime import datetime
@@ -24,6 +27,7 @@ import customtkinter as ctk
 
 from vendor_app.arc import format_amount
 from vendor_app.arc_analytics import ACTIVE, EXPIRED, NO_DATE, WIDTHS, ArcAnalysis
+from vendor_app.config import RELEASE_INDICATORS, RELEASE_PENDING, RELEASE_RELEASED
 from vendor_app.export import export_arc_analysis_to_excel, export_report_to_excel
 from vendor_app.gui import theme
 from vendor_app.gui.charts import BarChart, GroupedBarChart, PieChart
@@ -37,6 +41,14 @@ STATUS_COLORS = {
     ACTIVE: theme.SUCCESS,
     EXPIRED: theme.DANGER,
     NO_DATE: theme.TEXT_MUTED,
+}
+
+# The release indicator is a go/no-go, so it gets the same semantic reading:
+# released is usable, pending for approval is not.
+RELEASE_COLORS = {
+    RELEASE_INDICATORS[RELEASE_RELEASED]: theme.SUCCESS,
+    RELEASE_INDICATORS[RELEASE_PENDING]: theme.WARNING,
+    "Not stated": theme.TEXT_MUTED,
 }
 
 TONE_COLORS = {
@@ -103,6 +115,7 @@ class ArcDashboardTab(ctk.CTkFrame):
         self._build_arc_expiry(body)
         self._build_fo_expiry(body)
         self._build_report_section(body, "arc_without_fo")
+        self._build_report_section(body, "pending_release")
         self._build_report_section(body, "value_difference")
         self._build_vendor_section(body)
         self._build_report_section(body, "high_risk_arc")
@@ -214,13 +227,18 @@ class ArcDashboardTab(ctk.CTkFrame):
         )
         charts = ctk.CTkFrame(box, fg_color="transparent")
         charts.pack(fill="x", padx=16, pady=(0, 6))
-        charts.grid_columnconfigure(0, weight=1, uniform="chart")
-        charts.grid_columnconfigure(1, weight=1, uniform="chart")
+        for column in range(3):
+            charts.grid_columnconfigure(column, weight=1, uniform="chart")
 
         self.arc_pie = PieChart(charts, "ARC status", colors=STATUS_COLORS)
         self.arc_pie.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.release_pie = PieChart(
+            charts, "Release position", colors=RELEASE_COLORS,
+            empty_text="No release indicator on file.",
+        )
+        self.release_pie.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
         self.arc_trend = BarChart(charts, "ARC expiry trend", empty_text="No ARCs yet.")
-        self.arc_trend.grid(row=0, column=1, sticky="nsew")
+        self.arc_trend.grid(row=0, column=2, sticky="nsew")
 
         self._report_table(box, head, "arc_expiring", report)
 
@@ -290,6 +308,7 @@ class ArcDashboardTab(ctk.CTkFrame):
         )
 
         self.arc_pie.set_data(analysis.status_counts(analysis.arcs))
+        self.release_pie.set_data(analysis.release_counts())
         self.fo_pie.set_data(analysis.status_counts(analysis.fos))
         self.arc_trend.set_data(analysis.expiry_trend(analysis.arcs))
         self.fo_trend.set_data(analysis.expiry_trend(analysis.fos))

@@ -89,17 +89,31 @@ class RecordsScreen(ctk.CTkFrame):
     def _build(self):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=20, pady=(16, 10))
+        # grid, not pack: packing the title block first lets it claim its full
+        # requested width, and a long subtitle then pushes the action buttons
+        # off the right edge. A reserved column cannot be squeezed.
+        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=0)
+
         left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
+        left.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(
             left, text=self.TITLE, font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
-        ctk.CTkLabel(
-            left, text=self.SUBTITLE, font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
-        ).pack(anchor="w", pady=(2, 0))
+        self._subtitle = ctk.CTkLabel(
+            left, text=self.SUBTITLE, font=theme.small_font(),
+            text_color=theme.TEXT_SECONDARY, anchor="w", justify="left",
+        )
+        self._subtitle.pack(anchor="w", pady=(2, 0), fill="x")
+        # Wrap to whatever room the title block actually has, so a long
+        # subtitle grows downwards instead of sideways.
+        left.bind(
+            "<Configure>",
+            lambda e: self._subtitle.configure(wraplength=max(280, e.width - 8)),
+        )
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right")
+        actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
         primary_button(actions, self.IMPORT_LABEL, self.import_from_file, width=170).pack(
             side="left", padx=(0, 8)
         )

@@ -1,85 +1,117 @@
-"""The three ARC & FO record screens, built on RecordsScreen.
+"""The two ARC & FO record screens, built on RecordsScreen.
 
-Each level of the hierarchy gets the same treatment the other masters have -
-search, unlimited import, Excel-like paste, in-place editing, export and a
-change log - so there is nothing new to learn moving between them.
+    ARC Records  Table 1 - ARC data (ME3L export), one row per contract item
+    FO Records   Table 2 - framework & contract tracking, one row per FO item
 
-The derived columns (FO count, ARC value, line count, FO total) are shown
-read-only, because they are computed from the level below and typing into
-them would only create a figure that disagrees with its own detail.
+Both get the same treatment the other masters have - search, unlimited
+import, Excel-like paste, in-place editing, export and a change log - so
+there is nothing new to learn moving between them.
+
+The derived columns (frame orders, released against, difference, FO totals)
+are shown read-only: they are computed across the rows of a contract or a
+frame order, and typing into one would only create a figure that disagrees
+with its own detail. The decoded release columns are read-only in the grid
+too, and chosen from a list in the record dialog.
 """
 
-import customtkinter as ctk
-
 from vendor_app.config import (
-    ARC_COLUMN_WIDTHS, ARC_DERIVED_KEYS, ARC_DISPLAY_COLUMNS, ARC_KEYS, ARC_LABELS,
-    ARC_LINE_COLUMN_WIDTHS, ARC_LINE_KEYS, ARC_LINE_LABELS, ARC_LINE_WRAPPED_LABELS,
-    ARC_WRAPPED_LABELS, FO_COLUMN_WIDTHS, FO_DERIVED_KEYS, FO_DISPLAY_COLUMNS, FO_KEYS,
-    FO_LABELS, FO_WRAPPED_LABELS,
+    ARC_COLUMN_WIDTHS, ARC_DERIVED_KEYS, ARC_DISPLAY_COLUMNS, ARC_KEYS, ARC_KEY_FIELDS,
+    ARC_LABELS, ARC_WRAPPED_LABELS, FO_COLUMN_WIDTHS, FO_DERIVED_KEYS,
+    FO_DISPLAY_COLUMNS, FO_KEYS, FO_KEY_FIELDS, FO_LABELS, FO_WRAPPED_LABELS,
+    describe_release_indicator, describe_release_status,
 )
-from vendor_app.export import (
-    export_arc_lines_to_excel, export_arcs_to_excel, export_fos_to_excel,
-)
+from vendor_app.export import export_arcs_to_excel, export_fos_to_excel
 from vendor_app.importer import _normalize_header, _read_table
 from vendor_app.validators import ValidationError
 from vendor_app.gui.records_screen import RecordsScreen
 
-
-# The headers a raw ME3L / SAP FO download actually carries, mapped onto our
-# fields. Without these an untouched export has to be renamed column by column
-# before it will import, which is exactly the manual step this module removes.
+# The header shapes a real download carries, beyond our own labels. SAP
+# abbreviates column names differently between layouts, so an untouched
+# export still has to land on the right fields without being renamed first.
 HEADER_ALIASES = {
-    # ARC / outline agreement
-    "agreement no": "arc_no",
-    "agreement": "arc_no",
-    "outline agreement": "arc_no",
-    "contract no": "arc_no",
-    "purchasing document": "arc_no",
-    "short text": "arc_description",
-    "description": "arc_description",
-    "target value": "arc_value",
-    "arc value": "arc_value",
-    "arc value (target value)": "arc_value",
-    "net value": "arc_value",
-    "validity start": "arc_start_date",
-    "validity start date": "arc_start_date",
-    "valid from": "arc_start_date",
-    "validity end": "arc_end_date",
-    "validity end date": "arc_end_date",
-    "valid to": "arc_end_date",
+    # Table 1 - ARC data (ME3L)
+    "purchasing doc.": "purchasing_document",
+    "purch.doc.": "purchasing_document",
+    "purchasing document no": "purchasing_document",
+    "agreement no": "purchasing_document",
+    "outline agreement": "purchasing_document",
+    "contract no": "purchasing_document",
+    "contract no.": "purchasing_document",
+    "doc. date": "document_date",
+    "doc.date": "document_date",
+    "document date": "document_date",
+    "vendor/supplying plant": "vendor_supplying_plant",
+    "vendor / supplying plant": "vendor_supplying_plant",
+    "supplying plant": "vendor_supplying_plant",
+    "short text": "short_text",
+    "material short text": "short_text",
+    "validity per. start": "validity_start",
+    "validity per.start": "validity_start",
+    "validity start": "validity_start",
+    "valid from": "validity_start",
+    "validity period end": "validity_end",
+    "validity end": "validity_end",
+    "valid to": "validity_end",
+    "target val. (header)": "target_value",
+    "target val.": "target_value",
+    "target value": "target_value",
+    "target val": "target_value",
+    "release indicator": "release_indicator",
+    "release ind.": "release_indicator",
+    "rel. indicator": "release_indicator",
+    "release status": "release_status",
+    "rel. status": "release_status",
+    "po history/release documentation": "po_history",
+    "po history": "po_history",
+    "release documentation": "po_history",
     "purchasing group": "purchasing_group",
     "purchasing grp": "purchasing_group",
-    "pur group": "purchasing_group",
-    "release status": "release_status",
-    "release indicator": "release_status",
-    "vendor": "vendor_name",
-    "supplier": "vendor_name",
-    "supplier name": "vendor_name",
-    "vendor no": "vendor_code",
-    "supplier code": "vendor_code",
-    "plant code": "plant",
-    # FO / frame order
-    "fo": "fo_no",
-    "frame order": "fo_no",
-    "frame order no": "fo_no",
-    "fo start date": "fo_date",
-    "fo start": "fo_date",
-    "fo end date": "validity_end_date",
-    "fo end": "validity_end_date",
-    "fo validity end": "validity_end_date",
+    "pur. group": "purchasing_group",
+    "item": "item",
+    "plant": "plant",
+    # Table 2 - framework & contract tracking
+    "serial no.": "serial_no",
+    "serial no": "serial_no",
+    "sr. no.": "serial_no",
+    "contr.pur.group": "contract_pur_group",
+    "contr. pur. group": "contract_pur_group",
+    "contract purchasing group": "contract_pur_group",
+    "header text": "header_text",
+    "vendor": "vendor",
+    "vendor code": "vendor",
+    "vendor name": "vendor_name",
+    "contract value": "contract_value",
+    "requisitioner": "requisitioner",
+    "frame numbers": "frame_numbers",
+    "frame number": "frame_numbers",
+    "frame order": "frame_numbers",
+    "fo no": "frame_numbers",
+    "fo.valdt.start": "fo_validity_start",
+    "fo valdt start": "fo_validity_start",
+    "fo validity start": "fo_validity_start",
+    "fo.valdt.end": "fo_validity_end",
+    "fo valdt end": "fo_validity_end",
+    "fo validity end": "fo_validity_end",
+    "frame pur.group": "frame_pur_group",
+    "frame pur group": "frame_pur_group",
+    "description": "description",
+    "req.tracking no.": "req_tracking_no",
+    "req tracking no": "req_tracking_no",
+    "tracking no": "req_tracking_no",
     "released value": "released_value",
-    "open value": "open_value",
-    "balance value": "open_value",
-    "fo value": "fo_value",
+    "actual value": "actual_value",
+    "opening value": "opening_value",
 }
 
 
 def _load_rows(path, keys, labels):
-    """Read a spreadsheet of rows for one level, matching headers by label.
+    """Read a spreadsheet of rows for one table, matching headers by label.
 
-    Three header shapes are accepted, in order: our own exported labels, the
-    SAP/ME3L headers above, and our internal snake_case column names - so an
-    export from this app, a raw download and the stored CSV all import.
+    Three header shapes are accepted, in order: the spec's own column names,
+    the abbreviations a raw download uses, and our internal column names -
+    so an export from this app, an untouched SAP file and the stored CSV all
+    import. A column that matches none of them is ignored rather than
+    rejected: a real export always carries extras we do not need.
     """
     frame = _read_table(path)
     label_to_key = {_normalize_header(v): k for k, v in labels.items()}
@@ -89,11 +121,12 @@ def _load_rows(path, keys, labels):
         key = label_to_key.get(header)
         if key is None:
             alias = HEADER_ALIASES.get(header)
-            # An alias only applies to the level being imported: "Description"
-            # must not drop an FO's text onto an ARC field, and vice versa.
+            # An alias only applies to the table being imported, so an FO's
+            # "Description" can never land on a contract field, or the
+            # reverse.
             key = alias if alias in keys else None
-        if key is None and header.replace(" ", "_") in keys:
-            key = header.replace(" ", "_")
+        if key is None and header.replace(" ", "_").replace(".", "") in keys:
+            key = header.replace(" ", "_").replace(".", "")
         if key is not None and key not in columns:
             columns[key] = column
     return [
@@ -102,45 +135,83 @@ def _load_rows(path, keys, labels):
     ]
 
 
-class ArcRecordsScreen(RecordsScreen):
-    """The ARC master itself - the key every amendment is filed against."""
+class _ArcScreenBase(RecordsScreen):
+    """Shared wiring for two grids whose rows are keyed on several columns."""
+
+    KEY_FIELDS = ()
+    TABLE_ATTR = ""
+
+    def table_of(self):
+        return getattr(self.store, self.TABLE_ATTR)
+
+    def row_id(self, record):
+        return self.table_of().row_id(self.table_of().key_of(record))
+
+    def _selected_record(self):
+        ids = self.table.selected_ids()
+        if not ids:
+            from tkinter import messagebox
+            messagebox.showinfo("Select a Row", "Select a row first, or double-click it.")
+            return None
+        return self._rows.get(ids[0])
+
+    def _after_dialog(self):
+        self.refresh()
+        if self.on_data_changed:
+            self.on_data_changed()
+
+
+class ArcRecordsScreen(_ArcScreenBase):
+    """Table 1: ARC data, one row per item of a purchasing document."""
 
     TITLE = "ARC Records"
-    SUBTITLE = ("The master agreement, in ME3L column order. Double-click a row to "
-                "open the full ARC. FO Value and the difference against the ARC's "
-                "target are rolled up from the FOs, not typed in.")
+    SUBTITLE = ("Table 1 - ARC data (ME3L export), one row per contract item. "
+                "The header facts repeat down a document's items; its Target Val. "
+                "(Header) is read once, never summed across them.")
     DOUBLE_CLICK_EDITS = False
-    IMPORT_LABEL = "Import ARCs..."
+    IMPORT_LABEL = "Import ARC Data..."
+    KEY_FIELDS = ARC_KEY_FIELDS
+    TABLE_ATTR = "arcs"
     paste_keys = tuple(ARC_KEYS)
     paste_labels = ARC_LABELS
-    paste_note = ("Paste ARC rows copied from Excel, one contract per line. "
-                  "ARC No is the key and is required.")
+    paste_note = ("Paste ARC rows copied from the ME3L export, one line item per row. "
+                  "Purchasing Document identifies the contract and Item the line "
+                  "within it.")
+
+    # Decoded in the grid, so they read as words rather than as X's; the
+    # underlying code is chosen from a list in the record dialog.
+    READ_ONLY_KEYS = {"release_indicator", "release_status"}
 
     def __init__(self, master, store, on_data_changed=None):
         self.store = store
         super().__init__(
             master, ["sr_no"] + ARC_DISPLAY_COLUMNS, ARC_WRAPPED_LABELS, ARC_COLUMN_WIDTHS,
-            editable_keys=set(ARC_KEYS) - {"arc_no"}, on_data_changed=on_data_changed,
+            editable_keys=set(ARC_KEYS) - set(ARC_KEY_FIELDS) - self.READ_ONLY_KEYS,
+            on_data_changed=on_data_changed,
         )
 
     def fetch(self, query):
         rows = [self.store.arc_row(a) for a in self.store.all_arcs()]
+        for row in rows:
+            row["release_indicator"] = describe_release_indicator(row.get("release_indicator"))
+            row["release_status"] = describe_release_status(row.get("release_status"))
         needle = (query or "").strip().lower()
         if not needle:
             return rows
         return [r for r in rows
                 if any(needle in str(r.get(k, "")).lower() for k in ARC_DISPLAY_COLUMNS)]
 
-    def row_id(self, record):
-        return record["arc_no"]
-
     def row_values(self, record, index):
         return [index] + [record.get(k, "") for k in ARC_DISPLAY_COLUMNS]
 
     def commit(self, row_id, key, value):
         if key in ARC_DERIVED_KEYS:
-            return ("FO count, FO value and the difference are rolled up from the FOs - "
-                    "edit the FOs, or the ARC's own target value, instead.")
+            return ("Frame orders, released value and the difference are computed "
+                    "across the contract - edit the frame orders, or the contract's "
+                    "own Target Val. (Header), instead.")
+        if key in self.READ_ONLY_KEYS:
+            return ("Release indicator and status are codes - open the record "
+                    "(double-click the row) to choose one.")
         try:
             self.store.update_arc_field(row_id, key, value)
         except ValidationError as exc:
@@ -159,62 +230,55 @@ class ArcRecordsScreen(RecordsScreen):
         return export_arcs_to_excel(records, path)
 
     def delete_record(self, record):
-        return bool(record) and self.store.delete_arc(record["arc_no"])
+        return bool(record) and self.store.delete_arc(self.row_id(record))
 
     def on_row_double_click(self, row_id, column_key):
-        self.open_dialog(row_id)
+        self.open_dialog(self._rows.get(row_id))
 
-    def open_dialog(self, arc_no):
+    def open_dialog(self, record):
         from vendor_app.gui.arc_dialogs import ArcDialog
-        record = self.store.arcs.find(arc_no)
-        if record is None:
-            return
         ArcDialog(self, self.store, record, on_saved=self._after_dialog)
 
     def extra_actions(self, parent):
         from vendor_app.gui.widgets import secondary_button
-        secondary_button(parent, "Edit ARC", self._edit_selected, width=120).pack(
+        secondary_button(parent, "Edit Row", self._edit_selected, width=110).pack(
             side="left", padx=(0, 8)
         )
-        secondary_button(parent, "+ Add ARC", self._add, width=120).pack(side="left")
+        secondary_button(parent, "+ Add Item", self._add, width=120).pack(side="left")
 
     def _edit_selected(self):
-        ids = self.table.selected_ids()
-        if not ids:
-            from tkinter import messagebox
-            messagebox.showinfo("Select a Row", "Select an ARC first, or double-click it.")
-            return
-        self.open_dialog(ids[0])
+        record = self._selected_record()
+        if record is not None:
+            self.open_dialog(record)
 
     def _add(self):
-        from vendor_app.gui.arc_dialogs import ArcDialog
-        ArcDialog(self, self.store, None, on_saved=self._after_dialog)
-
-    def _after_dialog(self):
-        self.refresh()
-        if self.on_data_changed:
-            self.on_data_changed()
+        self.open_dialog(None)
 
 
-class FoRecordsScreen(RecordsScreen):
-    """The FOs: sub-parts of an ARC, many per contract."""
+class FoRecordsScreen(_ArcScreenBase):
+    """Table 2: framework & contract tracking, one row per frame order item."""
 
     TITLE = "FO Records"
-    SUBTITLE = ("Framework orders issued under an ARC, in SAP FO report column order. "
-                "Every FO names its ARC. FO Total is the sum of its line items "
-                "once it has any.")
+    SUBTITLE = ("Table 2 - framework & contract tracking, one row per frame order "
+                "item. Contract No., Contract Value and the contract validity dates "
+                "map from Table 1 and repeat here; Released, Actual and Opening "
+                "Value are the item's own and do add up.")
     DOUBLE_CLICK_EDITS = False
-    IMPORT_LABEL = "Import FOs..."
+    IMPORT_LABEL = "Import FO Data..."
+    KEY_FIELDS = FO_KEY_FIELDS
+    TABLE_ATTR = "fos"
     paste_keys = tuple(FO_KEYS)
     paste_labels = FO_LABELS
-    paste_note = ("Paste FO rows copied from Excel, one order per line. "
-                  "FO No and ARC No are both required.")
+    paste_note = ("Paste frame order rows copied from the tracking report. "
+                  "Frame Numbers and Item identify the row; Contract No. ties it "
+                  "back to its purchasing document.")
 
     def __init__(self, master, store, on_data_changed=None):
         self.store = store
         super().__init__(
             master, ["sr_no"] + FO_DISPLAY_COLUMNS, FO_WRAPPED_LABELS, FO_COLUMN_WIDTHS,
-            editable_keys=set(FO_KEYS) - {"fo_no"}, on_data_changed=on_data_changed,
+            editable_keys=set(FO_KEYS) - set(FO_KEY_FIELDS),
+            on_data_changed=on_data_changed,
         )
 
     def fetch(self, query):
@@ -225,15 +289,12 @@ class FoRecordsScreen(RecordsScreen):
         return [r for r in rows
                 if any(needle in str(r.get(k, "")).lower() for k in FO_DISPLAY_COLUMNS)]
 
-    def row_id(self, record):
-        return record["fo_no"]
-
     def row_values(self, record, index):
         return [index] + [record.get(k, "") for k in FO_DISPLAY_COLUMNS]
 
     def commit(self, row_id, key, value):
         if key in FO_DERIVED_KEYS:
-            return "FO Total and line count are rolled up from the line items."
+            return "The FO totals are summed from this frame order's items."
         try:
             self.store.update_fo_field(row_id, key, value)
         except ValidationError as exc:
@@ -252,100 +313,26 @@ class FoRecordsScreen(RecordsScreen):
         return export_fos_to_excel(records, path)
 
     def delete_record(self, record):
-        return bool(record) and self.store.delete_fo(record["fo_no"])
+        return bool(record) and self.store.delete_fo(self.row_id(record))
 
     def on_row_double_click(self, row_id, column_key):
-        self.open_dialog(row_id)
+        self.open_dialog(self._rows.get(row_id))
 
-    def open_dialog(self, fo_no):
+    def open_dialog(self, record):
         from vendor_app.gui.arc_dialogs import FoDialog
-        record = self.store.fos.find(fo_no)
-        if record is None:
-            return
         FoDialog(self, self.store, record, on_saved=self._after_dialog)
 
     def extra_actions(self, parent):
         from vendor_app.gui.widgets import secondary_button
-        secondary_button(parent, "Edit FO", self._edit_selected, width=110).pack(
+        secondary_button(parent, "Edit Row", self._edit_selected, width=110).pack(
             side="left", padx=(0, 8)
         )
-        secondary_button(parent, "+ Add FO", self._add, width=110).pack(side="left")
+        secondary_button(parent, "+ Add Item", self._add, width=120).pack(side="left")
 
     def _edit_selected(self):
-        ids = self.table.selected_ids()
-        if not ids:
-            from tkinter import messagebox
-            messagebox.showinfo("Select a Row", "Select an FO first, or double-click it.")
-            return
-        self.open_dialog(ids[0])
+        record = self._selected_record()
+        if record is not None:
+            self.open_dialog(record)
 
     def _add(self):
-        from vendor_app.gui.arc_dialogs import FoDialog
-        FoDialog(self, self.store, None, on_saved=self._after_dialog)
-
-    def _after_dialog(self):
-        self.refresh()
-        if self.on_data_changed:
-            self.on_data_changed()
-
-
-class ArcLineItemsScreen(RecordsScreen):
-    """The line items - the references an FO's value is built from."""
-
-    TITLE = "Line Items"
-    SUBTITLE = ("The reference rows behind each FO. Line Value is taken as entered, "
-                "or computed as Quantity x Rate when it is left blank.")
-    IMPORT_LABEL = "Import Line Items..."
-    paste_keys = tuple(ARC_LINE_KEYS)
-    paste_labels = ARC_LINE_LABELS
-    paste_note = ("Paste line items copied from Excel. Each line references its FO No; "
-                  "leave Line Value blank to have Quantity x Rate used instead.")
-
-    def __init__(self, master, store, on_data_changed=None):
-        self.store = store
-        super().__init__(
-            master, ["sr_no"] + ARC_LINE_KEYS, ARC_LINE_WRAPPED_LABELS,
-            ARC_LINE_COLUMN_WIDTHS, editable_keys=set(ARC_LINE_KEYS),
-            on_data_changed=on_data_changed,
-        )
-
-    def fetch(self, query):
-        # Return the STORED records, never enriched copies: an in-place edit
-        # has to land on the object the store actually holds.
-        rows = self.store.all_lines()
-        needle = (query or "").strip().lower()
-        if not needle:
-            return rows
-        return [r for r in rows
-                if any(needle in str(r.get(k, "")).lower() for k in ARC_LINE_KEYS)]
-
-    def row_id(self, record):
-        return f"line-{id(record)}"
-
-    def row_values(self, record, index):
-        # Line Value is displayed as Quantity x Rate when it was left blank,
-        # so the grid shows what the line is worth without inventing stored data.
-        display = self.store.line_row(record)
-        return [index] + [display.get(k, "") for k in ARC_LINE_KEYS]
-
-    def commit(self, row_id, key, value):
-        record = self._rows.get(row_id)
-        try:
-            self.store.update_line_field(record, key, value)
-        except ValidationError as exc:
-            return str(exc)
-        except Exception as exc:
-            return str(exc)
-        return None
-
-    def read_file(self, path):
-        return _load_rows(path, ARC_LINE_KEYS, ARC_LINE_LABELS)
-
-    def import_rows(self, rows, progress=None):
-        return self.store.bulk_upsert_lines(rows, progress=progress)
-
-    def export(self, records, path):
-        return export_arc_lines_to_excel(records, path)
-
-    def delete_record(self, record):
-        return bool(record) and self.store.delete_line(record)
+        self.open_dialog(None)

@@ -383,264 +383,300 @@ OUTLOOK_BREAKDOWN_FOLDER = "Equipment Breakdown"
 #
 ARC_FILE = os.path.join(DATA_DIR, "arc_master.csv")
 FO_FILE = os.path.join(DATA_DIR, "fo_master.csv")
-ARC_LINE_ITEM_FILE = os.path.join(DATA_DIR, "arc_line_items.csv")
 ARC_AUDIT_FILE = os.path.join(DATA_DIR, "arc_audit_log.csv")
 
-# --- ARC (the master) ------------------------------------------------------
-# The stored column set follows the ME3L export the ARC data is pulled out of,
-# in that report's own order, so a downloaded sheet imports without being
-# reshaped first. The four fields after Release Status are the app's own
-# (amendment tracking, lifecycle and notes) and are simply left blank by an
-# untouched ME3L file.
+# --- Table 1: ARC data (ME3L export) ---------------------------------------
+# One row per LINE ITEM of a purchasing document, exactly as the export
+# produces it. The header facts - vendor, validity, target value, release -
+# repeat on every item of the same document, so anything computed per
+# contract is taken from the header ONCE and never summed across the
+# duplicates. That single rule is what keeps a contract's value honest.
 ARC_KEYS = [
-    "arc_no",
-    "vendor_code",
-    "vendor_name",
-    "arc_description",
-    "arc_start_date",       # ME3L: Validity Start
-    "arc_end_date",         # ME3L: Validity End
-    "arc_value",            # ME3L: ARC Value / Target Value
     "plant",
     "purchasing_group",
+    "purchasing_document",
+    "document_date",
+    "vendor_supplying_plant",
+    "item",
+    "short_text",
+    "validity_start",
+    "validity_end",
+    "target_value",
+    "release_indicator",
     "release_status",
-    "amendment_no",
-    "amendment_date",
-    "status",
-    "remarks",
+    "po_history",
 ]
 
 ARC_LABELS = {
-    "arc_no": "ARC No",
-    "vendor_code": "Vendor Code",
-    "vendor_name": "Vendor Name",
-    "arc_description": "ARC Description",
-    "arc_start_date": "Validity Start",
-    "arc_end_date": "Validity End",
-    "arc_value": "ARC Value (Target)",
     "plant": "Plant",
     "purchasing_group": "Purchasing Group",
-    "release_status": "Release Status",
-    "amendment_no": "Amendment No",
-    "amendment_date": "Amendment Date",
-    "status": "Status",
-    "remarks": "Remarks",
+    "purchasing_document": "Purchasing Document",
+    "document_date": "Document Date",
+    "vendor_supplying_plant": "Vendor/supplying plant",
+    "item": "Item",
+    "short_text": "Short Text",
+    "validity_start": "Validity Per. Start",
+    "validity_end": "Validity Period End",
+    "target_value": "Target Val. (Header)",
+    "release_indicator": "Release indicator",
+    "release_status": "Release status",
+    "po_history": "PO history/release documentation",
 }
 
-# Columns the ARC grid derives rather than stores. The target value is what
-# SAP released; the FO sum is what has actually been ordered against it, and
-# the difference between the two is the balance still open on the contract -
-# the figure this module exists to keep honest.
-ARC_DERIVED_KEYS = ["fo_count", "fo_value_total", "value_difference"]
+# A row is identified by its document and its item number: one purchasing
+# document carries many items, and re-importing must land on the same row.
+ARC_KEY_FIELDS = ("purchasing_document", "item")
+
+# Header-level columns: identical on every item of a document. Read once per
+# document, never added up.
+ARC_HEADER_KEYS = [
+    "plant", "purchasing_group", "purchasing_document", "document_date",
+    "vendor_supplying_plant", "validity_start", "validity_end",
+    "target_value", "release_indicator", "release_status",
+]
+
+# Release indicator: is the contract usable yet?
+RELEASE_RELEASED = "R"
+RELEASE_PENDING = "S"
+RELEASE_INDICATORS = {
+    RELEASE_RELEASED: "Released",
+    RELEASE_PENDING: "Pending for approval",
+}
+
+# Release status: how far up the approval chain a document has travelled.
+# The codes are counts of X, so they sort naturally by level.
+RELEASE_STATUS_LEVELS = {
+    "X": "Release by Buyer",
+    "XX": "Release by PV",
+    "XXX": "Release by R2",
+    "XXXX": "Release by R4",
+    "XXXXX": "Release by R6",
+}
+
+
+def describe_release_indicator(code: str) -> str:
+    """'R' -> 'R - Released'. An unknown code is shown as it came."""
+    code = (code or "").strip().upper()
+    if not code:
+        return ""
+    meaning = RELEASE_INDICATORS.get(code)
+    return f"{code} - {meaning}" if meaning else code
+
+
+def describe_release_status(code: str) -> str:
+    """'XXX' -> 'XXX - Release by R2'."""
+    code = (code or "").strip().upper()
+    if not code:
+        return ""
+    meaning = RELEASE_STATUS_LEVELS.get(code)
+    return f"{code} - {meaning}" if meaning else code
+
+
+# Columns the ARC grid derives per DOCUMENT and repeats on its items, the way
+# the source report repeats the header value.
+ARC_DERIVED_KEYS = ["frame_orders", "ordered_value", "value_difference"]
 
 ARC_DERIVED_LABELS = {
-    "fo_count": "FO Count",
-    "fo_value_total": "FO Value (Sum)",
-    "value_difference": "Difference (ARC - FO)",
+    "frame_orders": "Frame Orders",
+    "ordered_value": "Released Against",
+    "value_difference": "Difference (Target - Released)",
 }
 
-ARC_DISPLAY_COLUMNS = ARC_KEYS[:7] + ARC_DERIVED_KEYS + ARC_KEYS[7:]
+ARC_DISPLAY_COLUMNS = ARC_KEYS[:10] + ARC_DERIVED_KEYS + ARC_KEYS[10:]
 
 ARC_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",
-    "arc_no": "ARC\nNo",
-    "vendor_code": "Vendor\nCode",
-    "vendor_name": "Vendor\nName",
-    "arc_description": "ARC\nDescription",
-    "arc_start_date": "Validity\nStart",
-    "arc_end_date": "Validity\nEnd",
-    "arc_value": "ARC Value\n(Target)",
-    "fo_count": "FO\nCount",
-    "fo_value_total": "FO Value\n(Sum)",
-    "value_difference": "Difference\n(ARC - FO)",
     "plant": "Plant",
     "purchasing_group": "Purchasing\nGroup",
-    "release_status": "Release\nStatus",
-    "amendment_no": "Amendment\nNo",
-    "amendment_date": "Amendment\nDate",
-    "status": "Status",
-    "remarks": "Remarks",
+    "purchasing_document": "Purchasing\nDocument",
+    "document_date": "Document\nDate",
+    "vendor_supplying_plant": "Vendor /\nsupplying plant",
+    "item": "Item",
+    "short_text": "Short\nText",
+    "validity_start": "Validity Per.\nStart",
+    "validity_end": "Validity\nPeriod End",
+    "target_value": "Target Val.\n(Header)",
+    "frame_orders": "Frame\nOrders",
+    "ordered_value": "Released\nAgainst",
+    "value_difference": "Difference\n(Target - Released)",
+    "release_indicator": "Release\nindicator",
+    "release_status": "Release\nstatus",
+    "po_history": "PO history /\nrelease documentation",
 }
 
 ARC_COLUMN_WIDTHS = {
     "sr_no": 64,
-    "arc_no": 150,
-    "vendor_code": 110,
-    "vendor_name": 230,
-    "arc_description": 260,
-    "arc_start_date": 120,
-    "arc_end_date": 120,
-    "arc_value": 140,
-    "fo_count": 90,
-    "fo_value_total": 140,
-    "value_difference": 150,
-    "plant": 120,
-    "purchasing_group": 130,
-    "release_status": 120,
-    "amendment_no": 120,
-    "amendment_date": 130,
-    "status": 110,
-    "remarks": 240,
+    "plant": 90,
+    "purchasing_group": 120,
+    "purchasing_document": 160,
+    "document_date": 120,
+    "vendor_supplying_plant": 260,
+    "item": 70,
+    "short_text": 280,
+    "validity_start": 120,
+    "validity_end": 120,
+    "target_value": 150,
+    "frame_orders": 100,
+    "ordered_value": 150,
+    "value_difference": 170,
+    "release_indicator": 190,
+    "release_status": 180,
+    "po_history": 300,
 }
 
-ARC_STATUS_VALUES = ["Active", "Amended", "Expired", "Closed"]
-ARC_STATUS_DEFAULT = "Active"
+# Pre-rename columns, so a store written by an earlier build still loads.
+ARC_LEGACY_COLUMNS = {
+    "arc_no": "purchasing_document",
+    "arc_description": "short_text",
+    "arc_start_date": "validity_start",
+    "arc_end_date": "validity_end",
+    "arc_value": "target_value",
+}
 
-# --- FO (the sub-part) -----------------------------------------------------
-# Mirrors the SAP FO report's columns. FO No leads because it is this table's
-# key and the grid's first column; ARC No follows immediately, since an FO
-# only means anything as a sub-part of its contract.
+# --- Table 2: framework & contract tracking --------------------------------
+# One row per ITEM of a frame order. Contract No., Contract Value and the two
+# contract validity dates map straight from Table 1 (Purchasing Document,
+# Target Val. (Header), Validity Per. Start / Period End) and repeat here the
+# same way - so they, too, are read once per contract rather than summed.
 FO_KEYS = [
-    "fo_no",
-    "arc_no",
-    "vendor_code",
-    "vendor_name",
-    "fo_description",
-    "fo_date",              # SAP: FO Start Date
-    "validity_end_date",    # SAP: FO End Date
-    "fo_value",
-    "released_value",
-    "open_value",
+    "serial_no",
     "plant",
-    "purchasing_group",
-    "status",
-    "remarks",
+    "contract_no",
+    "contract_pur_group",
+    "header_text",
+    "vendor",
+    "vendor_name",
+    "contract_value",
+    "validity_start",
+    "validity_end",
+    "requisitioner",
+    "frame_numbers",
+    "fo_validity_start",
+    "fo_validity_end",
+    "item",
+    "frame_pur_group",
+    "description",
+    "req_tracking_no",
+    "released_value",
+    "actual_value",
+    "opening_value",
 ]
 
 FO_LABELS = {
-    "fo_no": "FO No",
-    "arc_no": "ARC No",
-    "vendor_code": "Vendor Code",
-    "vendor_name": "Vendor Name",
-    "fo_description": "FO Description",
-    "fo_date": "FO Start Date",
-    "validity_end_date": "FO End Date",
-    "fo_value": "FO Value",
-    "released_value": "Released Value",
-    "open_value": "Open Value",
+    "serial_no": "Serial No.",
     "plant": "Plant",
-    "purchasing_group": "Purchasing Group",
-    "status": "Status",
-    "remarks": "Remarks",
+    "contract_no": "Contract No.",
+    "contract_pur_group": "Contr.Pur.Group",
+    "header_text": "Header Text",
+    "vendor": "Vendor",
+    "vendor_name": "Vendor Name",
+    "contract_value": "Contract Value",
+    "validity_start": "Validity Start",
+    "validity_end": "Validity End",
+    "requisitioner": "Requisitioner",
+    "frame_numbers": "Frame Numbers",
+    "fo_validity_start": "FO.Valdt.Start",
+    "fo_validity_end": "FO.Valdt.End",
+    "item": "Item",
+    "frame_pur_group": "Frame Pur.Group",
+    "description": "Description",
+    "req_tracking_no": "Req.Tracking No.",
+    "released_value": "Released Value",
+    "actual_value": "Actual Value",
+    "opening_value": "Opening Value",
 }
 
-# An FO's effective value comes from its line items when it has any, so the
-# grid shows both the entered figure and the rolled-up one.
-FO_DERIVED_KEYS = ["line_count", "fo_total"]
+FO_KEY_FIELDS = ("frame_numbers", "item")
+
+# Repeated from the contract on every row of every frame order under it.
+FO_HEADER_KEYS = [
+    "plant", "contract_no", "contract_pur_group", "header_text",
+    "vendor", "vendor_name", "contract_value", "validity_start", "validity_end",
+]
+
+# Per-item money columns - these DO add up within their frame order. The
+# header columns above never do.
+FO_ITEM_VALUE_KEYS = ["released_value", "actual_value", "opening_value"]
+
+FO_DERIVED_KEYS = ["fo_items", "fo_released_total"]
 
 FO_DERIVED_LABELS = {
-    "line_count": "Line Items",
-    "fo_total": "FO Total (Effective)",
+    "fo_items": "Items on FO",
+    "fo_released_total": "FO Released Total",
 }
 
-FO_DISPLAY_COLUMNS = FO_KEYS[:10] + FO_DERIVED_KEYS + FO_KEYS[10:]
+FO_DISPLAY_COLUMNS = FO_KEYS[:18] + FO_DERIVED_KEYS + FO_KEYS[18:]
 
 FO_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",
-    "fo_no": "FO\nNo",
-    "arc_no": "ARC\nNo",
-    "vendor_code": "Vendor\nCode",
-    "vendor_name": "Vendor\nName",
-    "fo_description": "FO\nDescription",
-    "fo_date": "FO Start\nDate",
-    "validity_end_date": "FO End\nDate",
-    "fo_value": "FO Value\n(Entered)",
-    "released_value": "Released\nValue",
-    "open_value": "Open\nValue",
-    "line_count": "Line\nItems",
-    "fo_total": "FO Total\n(Effective)",
+    "serial_no": "Serial\nNo.",
     "plant": "Plant",
-    "purchasing_group": "Purchasing\nGroup",
-    "status": "Status",
-    "remarks": "Remarks",
+    "contract_no": "Contract\nNo.",
+    "contract_pur_group": "Contr.Pur.\nGroup",
+    "header_text": "Header\nText",
+    "vendor": "Vendor",
+    "vendor_name": "Vendor\nName",
+    "contract_value": "Contract\nValue",
+    "validity_start": "Validity\nStart",
+    "validity_end": "Validity\nEnd",
+    "requisitioner": "Requisitioner",
+    "frame_numbers": "Frame\nNumbers",
+    "fo_validity_start": "FO.Valdt.\nStart",
+    "fo_validity_end": "FO.Valdt.\nEnd",
+    "item": "Item",
+    "frame_pur_group": "Frame Pur.\nGroup",
+    "description": "Description",
+    "req_tracking_no": "Req.Tracking\nNo.",
+    "fo_items": "Items\non FO",
+    "fo_released_total": "FO Released\nTotal",
+    "released_value": "Released\nValue",
+    "actual_value": "Actual\nValue",
+    "opening_value": "Opening\nValue",
 }
 
 FO_COLUMN_WIDTHS = {
     "sr_no": 64,
-    "fo_no": 150,
-    "arc_no": 150,
-    "vendor_code": 110,
+    "serial_no": 90,
+    "plant": 90,
+    "contract_no": 160,
+    "contract_pur_group": 130,
+    "header_text": 250,
+    "vendor": 110,
     "vendor_name": 230,
-    "fo_description": 240,
-    "fo_date": 120,
-    "validity_end_date": 120,
-    "fo_value": 130,
-    "released_value": 130,
-    "open_value": 130,
-    "line_count": 90,
-    "fo_total": 150,
-    "plant": 120,
-    "purchasing_group": 130,
-    "status": 110,
-    "remarks": 240,
+    "contract_value": 140,
+    "validity_start": 120,
+    "validity_end": 120,
+    "requisitioner": 150,
+    "frame_numbers": 160,
+    "fo_validity_start": 130,
+    "fo_validity_end": 130,
+    "item": 70,
+    "frame_pur_group": 130,
+    "description": 260,
+    "req_tracking_no": 140,
+    "fo_items": 100,
+    "fo_released_total": 150,
+    "released_value": 140,
+    "actual_value": 130,
+    "opening_value": 140,
 }
 
-FO_STATUS_VALUES = ["Open", "Partially Executed", "Executed", "Closed"]
-FO_STATUS_DEFAULT = "Open"
-
-# --- Line items (the references) ------------------------------------------
-ARC_LINE_KEYS = [
-    "arc_no",
-    "fo_no",
-    "line_no",
-    "item_code",
-    "item_description",
-    "uom",
-    "quantity",
-    "rate",
-    "line_value",
-    "reference",
-    "remarks",
-]
-
-ARC_LINE_LABELS = {
-    "arc_no": "ARC No",
-    "fo_no": "FO No",
-    "line_no": "Line No",
-    "item_code": "Item Code",
-    "item_description": "Item Description",
-    "uom": "UOM",
-    "quantity": "Quantity",
-    "rate": "Rate",
-    "line_value": "Line Value",
-    "reference": "Reference",
-    "remarks": "Remarks",
-}
-
-ARC_LINE_WRAPPED_LABELS = {
-    "sr_no": "Sr.\nNo.",
-    "arc_no": "ARC\nNo",
-    "fo_no": "FO\nNo",
-    "line_no": "Line\nNo",
-    "item_code": "Item\nCode",
-    "item_description": "Item\nDescription",
-    "uom": "UOM",
-    "quantity": "Quantity",
-    "rate": "Rate",
-    "line_value": "Line\nValue",
-    "reference": "Reference",
-    "remarks": "Remarks",
-}
-
-ARC_LINE_COLUMN_WIDTHS = {
-    "sr_no": 64,
-    "arc_no": 150,
-    "fo_no": 150,
-    "line_no": 80,
-    "item_code": 130,
-    "item_description": 300,
-    "uom": 90,
-    "quantity": 110,
-    "rate": 120,
-    "line_value": 130,
-    "reference": 180,
-    "remarks": 240,
+FO_LEGACY_COLUMNS = {
+    "fo_no": "frame_numbers",
+    "arc_no": "contract_no",
+    "fo_description": "description",
+    "vendor_code": "vendor",
+    "fo_date": "fo_validity_start",
+    "validity_end_date": "fo_validity_end",
+    "fo_value": "released_value",
+    "open_value": "opening_value",
 }
 
 # Fields carrying money/quantity, parsed leniently (commas and currency
 # symbols are tolerated) so a figure pasted straight out of Excel still adds up.
 ARC_NUMERIC_FIELDS = {
-    "quantity", "rate", "line_value",
-    "arc_value", "fo_value", "released_value", "open_value",
+    "target_value", "contract_value",
+    "released_value", "actual_value", "opening_value",
 }
 
 # The expiry horizons every ARC/FO analysis is bucketed against. 30 days is
@@ -649,14 +685,15 @@ ARC_NUMERIC_FIELDS = {
 EXPIRY_WINDOWS = [30, 60, 90]
 ACTION_WINDOW = EXPIRY_WINDOWS[0]
 
-# The ARC master keeps its own change log, keyed by ARC No - which is exactly
-# what makes the ARC the master key for every amendment beneath it.
+# The ARC master keeps its own change log, keyed by the purchasing document -
+# which is exactly what makes the contract the key every amendment is filed
+# against, whether the change was to the contract, a frame order or an item.
 ARC_AUDIT_COLUMNS = ["timestamp", "arc_no", "reference", "action", "details", "actor"]
 
 ARC_AUDIT_WRAPPED_LABELS = {
     "timestamp": "Date &\nTime",
-    "arc_no": "ARC\nNo",
-    "reference": "FO / Line\nReference",
+    "arc_no": "Purchasing\nDocument",
+    "reference": "Item / Frame\nOrder",
     "action": "Action",
     "details": "Details",
     "actor": "Changed\nBy",

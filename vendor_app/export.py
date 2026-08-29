@@ -134,26 +134,21 @@ def _export_simple(records: list, path: str, columns_keys, labels, sheet_name) -
 
 
 def export_arcs_to_excel(records: list, path: str) -> str:
-    """ARC master, including the derived FO count and aggregated ARC value."""
+    """Table 1 as shown, including the per-contract derived columns."""
     from vendor_app.config import ARC_DERIVED_LABELS, ARC_DISPLAY_COLUMNS, ARC_LABELS
 
     labels = dict(ARC_LABELS)
     labels.update(ARC_DERIVED_LABELS)
-    return _export_simple(records, path, ARC_DISPLAY_COLUMNS, labels, "ARC Master")
+    return _export_simple(records, path, ARC_DISPLAY_COLUMNS, labels, "ARC Data")
 
 
 def export_fos_to_excel(records: list, path: str) -> str:
+    """Table 2 as shown, including each frame order's item totals."""
     from vendor_app.config import FO_DERIVED_LABELS, FO_DISPLAY_COLUMNS, FO_LABELS
 
     labels = dict(FO_LABELS)
     labels.update(FO_DERIVED_LABELS)
-    return _export_simple(records, path, FO_DISPLAY_COLUMNS, labels, "FO Master")
-
-
-def export_arc_lines_to_excel(records: list, path: str) -> str:
-    from vendor_app.config import ARC_LINE_KEYS, ARC_LINE_LABELS
-
-    return _export_simple(records, path, ARC_LINE_KEYS, ARC_LINE_LABELS, "ARC Line Items")
+    return _export_simple(records, path, FO_DISPLAY_COLUMNS, labels, "FO Data")
 
 
 def export_report_to_excel(report, path: str) -> str:
