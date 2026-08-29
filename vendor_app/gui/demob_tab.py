@@ -23,7 +23,7 @@ from vendor_app.gui.editable_table import EditableTable
 from vendor_app.gui.loading import run_with_loading
 from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.toast import notify
-from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label
+from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label, wrap_children
 
 COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 
@@ -41,6 +41,7 @@ class DemobTab(ctk.CTkFrame):
         header.pack(fill="x", padx=20, pady=(16, 10))
         left = ctk.CTkFrame(header, fg_color="transparent")
         left.pack(side="left", fill="x", expand=True)
+        wrap_children(left)
         ctk.CTkLabel(
             left, text="De-mob Equipment", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")

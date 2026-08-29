@@ -32,6 +32,7 @@ from datetime import date, datetime
 import pandas as pd
 
 from vendor_app.config import (
+    ARC_DATE_FIELDS,
     ARC_FILE,
     ARC_HEADER_KEYS,
     ARC_KEYS,
@@ -39,6 +40,7 @@ from vendor_app.config import (
     ARC_LABELS,
     ARC_LEGACY_COLUMNS,
     DATA_DIR,
+    FO_DATE_FIELDS,
     FO_FILE,
     FO_ITEM_VALUE_KEYS,
     FO_KEYS,
@@ -116,8 +118,17 @@ def split_vendor(text):
 DATE_FORMATS = (
     "%d.%m.%Y", "%d.%m.%y",
     "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
-    "%d-%b-%Y", "%d %b %Y", "%Y/%m/%d", "%d-%m-%y", "%d/%m/%y",
+    "%d-%b-%Y", "%d %b %Y", "%b %d %Y", "%d %B %Y",
+    "%Y/%m/%d", "%d-%m-%y", "%d/%m/%y",
 )
+
+# Every ARC and FO date is shown in exactly this shape, whatever it arrived as.
+DATE_DISPLAY_FORMAT = "%d.%m.%Y"
+
+# A real date cell read out of Excel comes through pandas as
+# "2026-09-16 00:00:00" - the midnight is an artefact of the cell's type, not
+# information. It is stripped before parsing so it can never reach the screen.
+_TIME_TAIL_RE = re.compile(r"[ T]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*(AM|PM|am|pm)?$")
 
 
 def parse_date(value):
@@ -127,7 +138,7 @@ def parse_date(value):
     and counted separately, because silently treating it as expired - or as
     active - would put a wrong contract in front of management.
     """
-    text = normalize(value)
+    text = _TIME_TAIL_RE.sub("", normalize(value)).strip()
     if not text:
         return None
     for fmt in DATE_FORMATS:
@@ -136,6 +147,18 @@ def parse_date(value):
         except ValueError:
             continue
     return None
+
+
+def format_date(value) -> str:
+    """A date rendered as DD.MM.YYYY - the only shape ARC and FO dates take.
+
+    A cell that cannot be read as a date is returned exactly as it was
+    written. Reformatting something that is not a date would replace what
+    somebody typed with a guess, and a note in a date column ("TBD", "on
+    award") has to survive being looked at.
+    """
+    parsed = parse_date(value)
+    return parsed.strftime(DATE_DISPLAY_FORMAT) if parsed else normalize(value)
 
 
 def days_until(value, today=None):
@@ -159,8 +182,15 @@ def is_blank(raw: dict, keys) -> bool:
 
 
 # --------------------------------------------------------------- validation --
+def _normalise_dates(cleaned: dict, fields) -> dict:
+    """Store every date as DD.MM.YYYY, whatever shape it arrived in."""
+    for key in fields:
+        cleaned[key] = format_date(cleaned.get(key, ""))
+    return cleaned
+
+
 def validate_arc(raw: dict) -> dict:
-    cleaned = _clean(raw, ARC_KEYS)
+    cleaned = _normalise_dates(_clean(raw, ARC_KEYS), ARC_DATE_FIELDS)
     if not cleaned["purchasing_document"]:
         raise ValidationError(
             ARC_LABELS["purchasing_document"],
@@ -170,7 +200,7 @@ def validate_arc(raw: dict) -> dict:
 
 
 def validate_fo(raw: dict) -> dict:
-    cleaned = _clean(raw, FO_KEYS)
+    cleaned = _normalise_dates(_clean(raw, FO_KEYS), FO_DATE_FIELDS)
     if not cleaned["frame_numbers"]:
         raise ValidationError(FO_LABELS["frame_numbers"], "is required")
     if not cleaned["contract_no"]:
@@ -412,6 +442,8 @@ class ArcStore:
         """
         document = normalize(record.get("purchasing_document", ""))
         enriched = dict(record)
+        for key in ARC_DATE_FIELDS:
+            enriched[key] = format_date(record.get(key, ""))
         enriched["target_value"] = display_amount(record.get("target_value", ""))
         enriched["frame_orders"] = str(len(self.frames_for_document(document)))
         enriched["ordered_value"] = format_amount(self.released_against(document))
@@ -421,6 +453,8 @@ class ArcStore:
     def fo_row(self, record: dict) -> dict:
         frame = normalize(record.get("frame_numbers", ""))
         enriched = dict(record)
+        for key in FO_DATE_FIELDS:
+            enriched[key] = format_date(record.get(key, ""))
         for key in ["contract_value"] + FO_ITEM_VALUE_KEYS:
             enriched[key] = display_amount(record.get(key, ""))
         enriched["fo_items"] = str(len(self.items_for_frame(frame)))

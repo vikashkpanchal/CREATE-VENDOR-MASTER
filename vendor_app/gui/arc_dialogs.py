@@ -15,11 +15,11 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from vendor_app.config import (
-    ARC_KEYS, ARC_LABELS, FO_KEYS, FO_LABELS,
+    ARC_DATE_FIELDS, ARC_KEYS, ARC_LABELS, FO_DATE_FIELDS, FO_KEYS, FO_LABELS,
     RELEASE_INDICATORS, RELEASE_STATUS_LEVELS,
     describe_release_indicator, describe_release_status,
 )
-from vendor_app.arc import format_amount
+from vendor_app.arc import format_amount, format_date
 from vendor_app.validators import ValidationError, normalize
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
@@ -45,6 +45,7 @@ class _RecordDialog(ctk.CTkToplevel):
     SECTIONS = ()
     KEY_FIELDS = ()
     CODE_FIELDS = {}
+    DATE_FIELDS = ()
     TITLE_NEW = "Add Record"
     TITLE_EDIT = "Edit Record"
     HINT = ""
@@ -126,13 +127,22 @@ class _RecordDialog(ctk.CTkToplevel):
         row.pack(fill="x", padx=18, pady=6)
         required = key in self.KEY_FIELDS
         ctk.CTkLabel(
-            row, text=self.LABELS[key] + (" *" if required else ""), width=210, anchor="w",
+            row, text=self.LABELS[key] + (" *" if required else ""),
+            width=210, anchor="w",
             font=theme.body_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
-        var = ctk.StringVar(value=self.record.get(key, ""))
+        value = self.record.get(key, "")
+        if key in self.DATE_FIELDS:
+            # Shown the way it is stored and the way it is read everywhere
+            # else: DD.MM.YYYY, no time component.
+            value = format_date(value)
+        var = ctk.StringVar(value=value)
         entry = ctk.CTkEntry(
             row, textvariable=var, height=32,
+            # The hint sits in the empty field, which is exactly when it is
+            # needed, rather than lengthening every date label.
+            placeholder_text="DD.MM.YYYY" if key in self.DATE_FIELDS else "",
             fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
         )
         entry.pack(side="left", fill="x", expand=True)
@@ -198,6 +208,7 @@ class ArcDialog(_RecordDialog):
     KEYS = ARC_KEYS
     LABELS = ARC_LABELS
     KEY_FIELDS = ("purchasing_document", "item")
+    DATE_FIELDS = ARC_DATE_FIELDS
     CODE_FIELDS = {
         "release_indicator": RELEASE_INDICATORS,
         "release_status": RELEASE_STATUS_LEVELS,
@@ -254,6 +265,7 @@ class FoDialog(_RecordDialog):
     KEYS = FO_KEYS
     LABELS = FO_LABELS
     KEY_FIELDS = ("frame_numbers", "item")
+    DATE_FIELDS = FO_DATE_FIELDS
     TITLE_NEW = "Add Frame Order Item"
     TITLE_EDIT = "Edit Frame Order Item"
     HINT = ("A frame order is placed against one contract, so Contract No. is "

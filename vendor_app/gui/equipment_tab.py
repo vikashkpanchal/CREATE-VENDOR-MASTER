@@ -28,7 +28,7 @@ from vendor_app.validators import normalize
 from vendor_app.gui import theme
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
-from vendor_app.gui.widgets import card, divider, pill, primary_button, section_label
+from vendor_app.gui.widgets import card, divider, pill, primary_button, section_label, wrap_children
 
 COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 _EQUIPMENT_LABEL_TO_KEY = {label.lower(): key for key, label in EQUIPMENT_LABELS.items()}
@@ -78,7 +78,10 @@ class EquipmentSearchScreen(ctk.CTkFrame):
         bar.pack(fill="x", padx=20, pady=(20, 12))
 
         left = ctk.CTkFrame(bar, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
+        bar.grid_columnconfigure(0, weight=1)
+        bar.grid_columnconfigure(1, weight=0)
+        left.grid(row=0, column=0, sticky="ew")
+        wrap_children(left)
         ctk.CTkLabel(
             left, text="Search Equipment", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
@@ -102,7 +105,7 @@ class EquipmentSearchScreen(ctk.CTkFrame):
             height=36,
         )
         seg.set("Single Search")
-        seg.pack(side="right")
+        seg.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def _on_mode_change(self, value):
         for frame in (self.single_frame, self.multi_frame):

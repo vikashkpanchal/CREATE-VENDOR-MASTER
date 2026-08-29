@@ -27,7 +27,9 @@ front of a reader.
 from collections import OrderedDict
 from datetime import date
 
-from vendor_app.arc import days_until, format_amount, parse_amount, split_vendor
+from vendor_app.arc import (
+    days_until, format_amount, format_date, parse_amount, split_vendor,
+)
 from vendor_app.config import (
     ACTION_WINDOW, EXPIRY_WINDOWS, RELEASE_INDICATORS, RELEASE_PENDING,
     RELEASE_RELEASED, describe_release_indicator, describe_release_status,
@@ -204,8 +206,8 @@ class ArcAnalysis:
             "description": text,
             "plant": header.get("plant", ""),
             "purchasing_group": header.get("purchasing_group", ""),
-            "start": header.get("validity_start", ""),
-            "end": header.get("validity_end", ""),
+            "start": format_date(header.get("validity_start", "")),
+            "end": format_date(header.get("validity_end", "")),
             "target_value": target,
             "item_count": len(entry["items"]),
             "frame_count": len(self.store.frames_for_document(document)),
@@ -240,8 +242,8 @@ class ArcAnalysis:
                 "purchasing_group": normalize(first.get("frame_pur_group", "")),
                 "requisitioner": normalize(first.get("requisitioner", "")),
                 "req_tracking_no": normalize(first.get("req_tracking_no", "")),
-                "start": normalize(first.get("fo_validity_start", "")),
-                "end": normalize(first.get("fo_validity_end", "")),
+                "start": format_date(first.get("fo_validity_start", "")),
+                "end": format_date(first.get("fo_validity_end", "")),
                 # Item-level money adds up within the frame order; the
                 # contract value repeated on these rows never does.
                 "released": sum(parse_amount(r.get("released_value", "")) for r in items),

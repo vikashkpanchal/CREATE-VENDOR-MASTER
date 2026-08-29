@@ -157,13 +157,22 @@ class RecordsScreen(ctk.CTkFrame):
         hint_row.pack(fill="x", padx=20, pady=(0, 6))
         hint_row.grid_columnconfigure(0, weight=1)
         hint_row.grid_columnconfigure(1, weight=0)
-        ctk.CTkLabel(
+        self._hint = ctk.CTkLabel(
             hint_row, text=self.GRID_HINT, font=theme.font(10),
             text_color=theme.TEXT_MUTED, anchor="w", justify="left",
-        ).grid(row=0, column=0, sticky="w")
+        )
+        self._hint.grid(row=0, column=0, sticky="w")
 
         view = ctk.CTkFrame(hint_row, fg_color="transparent")
         view.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        # The controls keep their column; the hint wraps into whatever is left
+        # rather than being cut off mid-sentence on a narrow screen.
+        hint_row.bind(
+            "<Configure>",
+            lambda e, v=view: self._hint.configure(
+                wraplength=max(240, e.width - v.winfo_width() - 24)
+            ),
+        )
         self.extra_view_controls(view)
         ctk.CTkLabel(
             view, text="Row height:", font=theme.font(10), text_color=theme.TEXT_MUTED,

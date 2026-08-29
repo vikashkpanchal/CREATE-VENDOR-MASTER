@@ -24,7 +24,7 @@ from vendor_app.gui.editable_table import EditableTable
 from vendor_app.gui.filter_dropdown import FilterDropdown
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
-from vendor_app.gui.widgets import card, primary_button, secondary_button
+from vendor_app.gui.widgets import card, primary_button, secondary_button, wrap_children
 
 TABLE_COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 TOP_N = 10
@@ -54,7 +54,10 @@ class DashboardTab(ctk.CTkFrame):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=20, pady=(16, 10))
         left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
+        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=0)
+        left.grid(row=0, column=0, sticky="ew")
+        wrap_children(left)
         ctk.CTkLabel(
             left, text="Equipment Analytics", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
@@ -64,7 +67,7 @@ class DashboardTab(ctk.CTkFrame):
         ).pack(anchor="w", pady=(2, 0))
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right")
+        actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
         secondary_button(actions, "Reset Filters", self.reset_filters, width=130).pack(
             side="left", padx=(0, 8)
         )
@@ -161,19 +164,28 @@ class DashboardTab(ctk.CTkFrame):
     # own natural width happens to end.
     CONTROL_WIDTH = 175
     CELL_WIDTH = 195
+    # Eight filters, laid out as two rows of four. Capping the column count
+    # is what guarantees that: on a wide screen the panel would otherwise
+    # spread all eight across one row, which is the arrangement that runs off
+    # the edge of a 14" laptop. Two rows always fit, and always read as a
+    # block rather than a strip.
+    MAX_FILTER_ROWS = 2
 
     def _on_filter_resize(self, event):
         self._layout_filters(event.width)
 
     def _layout_filters(self, available_width):
-        """Re-flow the filter controls into as many equal columns as fit."""
+        """Re-flow the filter controls into equal columns, at most two rows deep."""
         usable = max(0, (available_width or 0) - 32)      # the card's padx
+        # Never wider than the two-row arrangement needs, however much room
+        # there is; narrower only when the room genuinely is not there.
+        cap = -(-len(self._filter_cells) // self.MAX_FILTER_ROWS)   # ceil
         if usable < self.CELL_WIDTH:
             # Too early to measure, or genuinely tiny - one column is always
             # reachable, which is the point: nothing is ever off-screen.
-            columns = 1 if usable else len(self._filter_cells)
+            columns = 1 if usable else cap
         else:
-            columns = max(1, min(len(self._filter_cells), usable // self.CELL_WIDTH))
+            columns = max(1, min(cap, usable // self.CELL_WIDTH))
         if self._filter_columns == columns:
             return
         self._filter_columns = columns

@@ -17,7 +17,7 @@ from vendor_app.gui import theme
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
-from vendor_app.gui.widgets import card, primary_button, pill
+from vendor_app.gui.widgets import card, pill, primary_button, wrap_children
 
 ACTION_FILTERS = ["All Actions", "Added", "Updated", "Status Change", "Deleted", "Vendor Added"]
 
@@ -47,7 +47,10 @@ class AuditLogTab(ctk.CTkFrame):
         header.pack(fill="x", padx=20, pady=(20, 12))
 
         left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
+        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=0)
+        left.grid(row=0, column=0, sticky="ew")
+        wrap_children(left)
         ctk.CTkLabel(
             left, text=self.title_text, font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
@@ -56,7 +59,8 @@ class AuditLogTab(ctk.CTkFrame):
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
-        primary_button(header, "Export Audit Log (.xlsx)", self.export_log, width=200).pack(side="right")
+        primary_button(header, "Export Audit Log (.xlsx)", self.export_log,
+                       width=200).grid(row=0, column=1, sticky="e", padx=(12, 0))
 
         toolbar = ctk.CTkFrame(self, fg_color="transparent")
         toolbar.pack(fill="x", padx=20, pady=(0, 10))

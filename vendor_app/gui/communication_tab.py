@@ -43,7 +43,7 @@ from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.missing_email_dialog import MissingEmailDialog
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
-from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label
+from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label, wrap_children
 
 PREVIEW_COLUMNS = ["vendor_code", "vendor_name", "rows", "to"]
 PREVIEW_LABELS = {
@@ -475,6 +475,7 @@ class CommunicationTab(ctk.CTkFrame):
 
         left = ctk.CTkFrame(header, fg_color="transparent")
         left.pack(side="left", fill="x", expand=True)
+        wrap_children(left)
         ctk.CTkLabel(
             left, text="Communication", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")

@@ -338,10 +338,16 @@ gets its sheet - "nothing is expiring" is an answer, and a missing tab reads
 as a missing one.
 
 **Dates** are read leniently (`31.03.2027`, `2027-03-31`, `31/03/2027`,
-`31-Mar-2027`, ...). A date that cannot be read is **never guessed at**: the
-row is counted under "No Validity Date" and kept out of every expiry bucket,
-because calling such a contract active - or expired - would put the wrong one
-in front of a reader.
+`31-Mar-2027`, and Excel's `2027-03-31 00:00:00`) and then shown in exactly
+one shape: **DD.MM.YYYY, never with a time**. That applies to every date in
+the ARC & FO Master - the grids, the structure tree, the record dialogs, the
+dashboard tables and the exported workbook - and the value is normalised on
+the way in, so the stored file carries it that way too. A cell that is not a
+date at all ("TBD on award") is left exactly as written rather than
+reformatted into a guess, and a date that cannot be read is **never guessed
+at**: the row is counted under "No Validity Date" and kept out of every
+expiry bucket, because calling such a contract active - or expired - would
+put the wrong one in front of a reader.
 
 ## Communication
 
@@ -393,6 +399,12 @@ Every grid in the app shares the same behaviour:
 - **Row height is adjustable** - Compact, Normal, Tall or Extra tall - from
   the control above each grid. The dashboard has one control for all its
   tables; each drill-down pop-up has its own.
+- **Nothing sits off the edge on a small screen.** The window opens no larger
+  than the display it opens on, every header keeps a reserved column for its
+  action buttons, titles wrap rather than pushing them away, and the
+  Equipment Master filter panel is capped at two rows of four so all eight
+  filters - Plant and Plant Code included - are always in view. Verified on a
+  1366x768 (14") display across every tab.
 
 Master Data Records, Multi Vendor Search results, and the Audit Log all
 use the same themed table component (`vendor_app/gui/style.py`): headers

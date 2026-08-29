@@ -40,8 +40,21 @@ class MainWindow(ctk.CTk):
         super().__init__()
         self.configure(fg_color=theme.BG_APP)
         self.title(APP_TITLE)
-        self.geometry("1480x900")
-        self.minsize(1150, 700)
+
+        # Never open larger than the screen it is opening on. A fixed
+        # 1480x900 window is bigger than a 14" laptop's 1366x768 display, so
+        # everything on the right of it - the action buttons, the last filter
+        # column - would sit off the edge with no way to reach it. The
+        # minimum size is clamped for the same reason: a minsize the screen
+        # cannot satisfy is a window that can never be made to fit.
+        screen_w, screen_h = self.winfo_screenwidth(), self.winfo_screenheight()
+        width = min(1480, max(900, screen_w - 80))
+        height = min(900, max(620, screen_h - 90))
+        self.geometry(
+            f"{width}x{height}+{max(0, (screen_w - width) // 2)}"
+            f"+{max(0, (screen_h - height) // 3)}"
+        )
+        self.minsize(min(1150, width), min(700, height))
 
         # --- stores -------------------------------------------------------
         self.audit_log = AuditLog(AUDIT_FILE)

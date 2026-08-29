@@ -674,6 +674,13 @@ FO_LEGACY_COLUMNS = {
 
 # Fields carrying money/quantity, parsed leniently (commas and currency
 # symbols are tolerated) so a figure pasted straight out of Excel still adds up.
+# Every date column in the two tables. They are normalised to DD.MM.YYYY on
+# the way in and rendered that way on the way out, so a validity period reads
+# the same everywhere no matter what shape the export wrote it in.
+ARC_DATE_FIELDS = ("document_date", "validity_start", "validity_end")
+FO_DATE_FIELDS = ("validity_start", "validity_end",
+                  "fo_validity_start", "fo_validity_end")
+
 ARC_NUMERIC_FIELDS = {
     "target_value", "contract_value",
     "released_value", "actual_value", "opening_value",

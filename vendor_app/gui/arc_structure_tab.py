@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
-from vendor_app.arc import format_amount, parse_amount
+from vendor_app.arc import format_amount, format_date, parse_amount
 from vendor_app.config import RELEASE_INDICATORS
 from vendor_app.export import export_arcs_to_excel
 from vendor_app.gui import theme
@@ -26,7 +26,7 @@ from vendor_app.gui.style import (
 )
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
-from vendor_app.gui.widgets import card, pill, primary_button, secondary_button
+from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, wrap_children
 
 # The tree column already carries every identifier - the document, the item
 # number, the frame number - so a separate "reference" column only repeated
@@ -47,7 +47,7 @@ HEADERS = {
 # a half-shown validity period is worse than useless - and the two free-text
 # columns absorb what is left, since a clipped description still reads.
 WIDTHS = {
-    "#0": 205, "level": 88, "release": 195, "description": 180,
+    "#0": 205, "level": 88, "release": 110, "description": 180,
     "vendor": 192, "dates": 240, "value": 225,
 }
 
@@ -64,7 +64,10 @@ class ArcStructureTab(ctk.CTkFrame):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=20, pady=(16, 10))
         left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
+        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=0)
+        left.grid(row=0, column=0, sticky="ew")
+        wrap_children(left)
         ctk.CTkLabel(
             left, text="ARC Structure", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
@@ -77,7 +80,7 @@ class ArcStructureTab(ctk.CTkFrame):
         ).pack(anchor="w", pady=(2, 0))
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right")
+        actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
         secondary_button(actions, "Collapse All", self.collapse_all, width=120).pack(
             side="left", padx=(0, 8)
         )
@@ -138,12 +141,46 @@ class ArcStructureTab(ctk.CTkFrame):
         hsb.grid(row=1, column=0, sticky="ew")
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
+        # On a narrow screen the two free-text columns give way so the
+        # figures and dates stay in view without scrolling. The tree's own
+        # width comes from its grid cell, not from its columns, so measuring
+        # it here cannot feed back into the widths being set.
+        self.tree.bind("<Configure>", lambda e: self._fit_columns(e.width))
+
         self.tree.tag_configure("contract", background=theme.BG_CARD_ALT,
                                 font=(theme.FONT_FAMILY, 11, "bold"))
         self.tree.tag_configure("orphan", background=theme.DANGER_SOFT)
         self.tree.tag_configure("frame", background=theme.BG_CARD)
         self.tree.tag_configure("item", background=theme.BG_ROW_ALT)
         self.tree.bind("<Double-1>", self._on_double_click)
+
+    # These two carry prose; everything else carries a figure, a date or a
+    # code that must not be cut, so the shortfall is taken out of these.
+    FLEXIBLE = ("description", "vendor")
+    FLEXIBLE_FLOOR = 110
+
+    def _fit_columns(self, viewport):
+        if viewport <= 1:
+            return
+        fixed = WIDTHS["#0"] + sum(
+            WIDTHS[key] for key in COLUMNS if key not in self.FLEXIBLE
+        )
+        natural = sum(WIDTHS[key] for key in self.FLEXIBLE)
+        # A margin, not a hairline: the last column has to land inside the
+        # viewport with room to spare, or the figure it holds is the thing
+        # that gets clipped.
+        budget = max(len(self.FLEXIBLE) * self.FLEXIBLE_FLOOR, viewport - fixed - 26)
+        if budget >= natural:
+            widths = {key: WIDTHS[key] for key in self.FLEXIBLE}
+        else:
+            share = budget / natural
+            widths = {
+                key: max(self.FLEXIBLE_FLOOR, int(WIDTHS[key] * share))
+                for key in self.FLEXIBLE
+            }
+        for key, width in widths.items():
+            if self.tree.column(key, "width") != width:
+                self.tree.column(key, width=width, minwidth=self.FLEXIBLE_FLOOR)
 
     def _build_kpis(self):
         strip = ctk.CTkFrame(self, fg_color="transparent")
@@ -193,8 +230,7 @@ class ArcStructureTab(ctk.CTkFrame):
                 "", "end", text=f"  {node['document']}", open=False, tags=tags,
                 values=[
                     "Contract",
-                    RELEASE_INDICATORS.get(
-                        (header.get("release_indicator", "") or "").strip().upper(), ""),
+                    self._release_word(header.get("release_indicator", "")),
                     self._contract_text(node),
                     header.get("vendor_supplying_plant", ""),
                     self._dates(header.get("validity_start", ""),
@@ -252,6 +288,17 @@ class ArcStructureTab(ctk.CTkFrame):
         self.count_pill.configure(text=f"  {text}  ")
 
     @staticmethod
+    def _release_word(code):
+        """One word in the tree: "Released" or "Pending".
+
+        The full wording ("S - Pending for approval") is on the ARC Records
+        row and in the dashboard's Pending Approval table; here it would cost
+        more width than the figures beside it can spare.
+        """
+        meaning = RELEASE_INDICATORS.get((code or "").strip().upper(), "")
+        return meaning.split(" for ")[0] if meaning else ""
+
+    @staticmethod
     def _contract_text(node):
         """The contract's own text: the first item that carries one."""
         for item in node["items"]:
@@ -289,6 +336,8 @@ class ArcStructureTab(ctk.CTkFrame):
 
     @staticmethod
     def _dates(start, end):
+        """A validity period, both ends as DD.MM.YYYY and nothing else."""
+        start, end = format_date(start), format_date(end)
         if start and end:
             return f"{start} to {end}"
         return start or end

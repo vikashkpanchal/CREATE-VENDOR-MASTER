@@ -13,7 +13,7 @@ from vendor_app.gui.edit_dialog import EditVendorDialog
 from vendor_app.gui.style import build_table, insert_row, set_heading_text
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce
-from vendor_app.gui.widgets import card, primary_button, secondary_button, danger_button, pill
+from vendor_app.gui.widgets import card, danger_button, pill, primary_button, secondary_button, wrap_children
 
 COLUMNS = ["sr_no"] + DISPLAY_COLUMNS
 
@@ -36,7 +36,10 @@ class MasterTab(ctk.CTkFrame):
         header.pack(fill="x", padx=20, pady=(20, 12))
 
         left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
+        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=0)
+        left.grid(row=0, column=0, sticky="ew")
+        wrap_children(left)
         ctk.CTkLabel(
             left, text="Master Data Records", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
@@ -48,7 +51,7 @@ class MasterTab(ctk.CTkFrame):
         ).pack(anchor="w", pady=(2, 0))
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right")
+        actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
         primary_button(actions, "+ Add Vendor", self.add_vendor, width=140).pack(side="left", padx=(0, 8))
         secondary_button(actions, "Edit Selected", self.edit_selected).pack(side="left", padx=(0, 8))
         primary_button(actions, "Export All (.xlsx)", self.export_all, width=170).pack(side="left")

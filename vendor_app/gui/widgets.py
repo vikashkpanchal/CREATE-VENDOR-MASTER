@@ -93,3 +93,20 @@ def card(master, **kwargs):
     defaults = dict(fg_color=theme.BG_CARD, corner_radius=10, border_width=1, border_color=theme.BORDER_SOFT)
     defaults.update(kwargs)
     return ctk.CTkFrame(master, **defaults)
+
+
+def wrap_children(frame, reserve=0):
+    """Keep a header's text wrapping inside the room it actually has.
+
+    A title block sitting next to action buttons must give way to them, so
+    its labels wrap onto a second line instead of demanding width they will
+    not get - and instead of being clipped mid-sentence on a small screen.
+    """
+    def _apply(event):
+        width = max(200, event.width - reserve)
+        for child in frame.winfo_children():
+            if isinstance(child, ctk.CTkLabel):
+                child.configure(wraplength=width, justify="left", anchor="w")
+
+    frame.bind("<Configure>", _apply)
+    return frame
