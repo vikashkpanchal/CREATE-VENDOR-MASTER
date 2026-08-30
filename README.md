@@ -39,14 +39,35 @@ Every vendor record uses this exact field order:
 | 8 | Contact Person2 Name | Optional |
 | 9 | Contact Person2 Contact Number | Optional; digits only if provided |
 | 10 | Contact Person2 Email ID | Optional; single address |
+| 11 | Vendor Type | Optional; **CAD or MARKET only** |
 
 Sheets exported by older builds (which used "Vendor Owner ..." /
 "Vendor Supervisor ..." headers, and split emails across "Vendor Email ID
 1/2/3" columns) still import correctly.
 
-These 9 core fields (plus generated Sr. No.) are the exact, contractual
-layout for the bulk-entry grid and the `.xlsx` export — untouched by the
-operational metadata below.
+The 9 core fields (plus generated Sr. No.) are the exact, contractual
+layout for the bulk-entry grid and the `.xlsx` export. **Vendor Type is
+appended after them, never inserted among them**, so that order is
+untouched — as is the operational metadata below.
+
+### Vendor Type
+
+A vendor is one of exactly two things, so the field is a choice rather than
+free text:
+
+- The record dialog offers a dropdown — `(not set)`, `CAD`, `MARKET`. There
+  is no way to type a third value into it.
+- Import, paste and in-place cell edits go through the same rule. Case and
+  surrounding space are forgiven (`cad`, ` Market ` are accepted and stored
+  as `CAD` / `MARKET`), because a pasted column will not be consistent about
+  them. Anything else is **rejected with the row named**, rather than
+  quietly creating a category nobody agreed to.
+- Blank is allowed, so existing vendors do not have to be classified before
+  anything else will save, and — like every other field — a blank on
+  re-import never overwrites a type already stored.
+- Typing `CAD` or `MARKET` into the Vendor Records search filters to that
+  type. The match is on the whole word, so searching a name containing "ca"
+  does not drag in every CAD vendor.
 
 ### Operational metadata (SAP/Oracle-style)
 

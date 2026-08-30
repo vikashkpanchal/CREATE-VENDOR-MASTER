@@ -9,14 +9,22 @@ everywhere. Lifecycle status (Active/Inactive/Blocked) is edited here too.
 import customtkinter as ctk
 from tkinter import messagebox
 
-from vendor_app.config import LABELS, STATUS_VALUES, STATUS_DEFAULT
+from vendor_app.config import LABELS, STATUS_VALUES, STATUS_DEFAULT, VENDOR_TYPE_VALUES
 from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
 
+# Vendor Type is a choice, not free text, so it is rendered as a dropdown
+# rather than an entry - there is no way to type a third value into it.
+CHOICE_FIELDS = {"vendor_type": VENDOR_TYPE_VALUES}
+NOT_SET = "(not set)"
+
 SECTIONS = [
-    ("VENDOR", ["vendor_code", "vendor_name", "vendor_email"]),
+    # Type sits with Status at the end of the vendor block: both are choices
+    # about the vendor rather than parts of its identity, and both come after
+    # the mandated fields in the grid and the export too.
+    ("VENDOR", ["vendor_code", "vendor_name", "vendor_email", "vendor_type"]),
     ("CONTACT PERSON 1", ["vendor_owner_name", "vendor_owner_contact", "vendor_owner_email"]),
     ("CONTACT PERSON 2", ["vendor_supervisor_name", "vendor_supervisor_contact", "vendor_supervisor_email"]),
 ]
@@ -63,8 +71,9 @@ class EditVendorDialog(ctk.CTkToplevel):
             text_color=theme.TEXT_PRIMARY,
         ).pack(anchor="w")
         hint_text = (
-            "Vendor Code is mandatory and numeric. Contact numbers must be digits only. "
-            "Separate multiple emails with a semicolon (;)."
+            "Vendor Code is mandatory and numeric. Vendor Type is CAD or MARKET. "
+            "Contact numbers must be digits only. Separate multiple emails with a "
+            "semicolon (;)."
             if self.is_new
             else "Blank fields are left unchanged - only fields you edit overwrite the stored record. "
             "Separate multiple emails with a semicolon (;)."
@@ -100,6 +109,21 @@ class EditVendorDialog(ctk.CTkToplevel):
                     row, text=label_text, width=210, anchor="w", font=theme.body_font(),
                     text_color=theme.TEXT_SECONDARY,
                 ).pack(side="left")
+
+                if key in CHOICE_FIELDS:
+                    current = (self.record.get(key, "") or "").upper()
+                    var = ctk.StringVar(
+                        value=current if current in CHOICE_FIELDS[key] else NOT_SET
+                    )
+                    ctk.CTkOptionMenu(
+                        row, variable=var, values=[NOT_SET] + list(CHOICE_FIELDS[key]),
+                        width=200, height=32,
+                        fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+                        button_hover_color=theme.BG_HOVER,
+                        dropdown_fg_color=theme.BG_CARD_ALT,
+                    ).pack(side="left")
+                    self.vars[key] = var
+                    continue
 
                 var = ctk.StringVar(value=self.record.get(key, ""))
                 entry = ctk.CTkEntry(
@@ -144,6 +168,9 @@ class EditVendorDialog(ctk.CTkToplevel):
 
     def save(self):
         raw = {key: self.vars[key].get() for key in self.vars}
+        for key in CHOICE_FIELDS:
+            if raw.get(key) == NOT_SET:
+                raw[key] = ""
         if not self.is_new:
             raw["vendor_code"] = self.record["vendor_code"]
 

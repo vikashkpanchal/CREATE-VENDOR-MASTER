@@ -33,6 +33,7 @@ def build_export_dataframe(records: list) -> pd.DataFrame:
         LABELS["vendor_supervisor_name"],
         LABELS["vendor_supervisor_contact"],
         LABELS["vendor_supervisor_email"],
+        LABELS["vendor_type"],
         "Status",
     ]
 

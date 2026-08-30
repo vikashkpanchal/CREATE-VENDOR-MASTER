@@ -255,7 +255,12 @@ class VendorStore:
 
     def search(self, query: str, status: str = None) -> list:
         """Filter records by substring match on Vendor Code or Vendor Name,
-        and optionally by lifecycle status ("All" or None means no filter)."""
+        and optionally by lifecycle status ("All" or None means no filter).
+
+        Vendor Type matches too, but only on the whole word: a substring
+        match would make every search containing "ca" drag in every CAD
+        vendor, which is not what someone typing a name is asking for.
+        """
         records = self.all_records()
         if status and status != "All":
             records = [r for r in records if r.get("status", STATUS_DEFAULT) == status]
@@ -264,7 +269,9 @@ class VendorStore:
             return records
         return [
             r for r in records
-            if q in r["vendor_code"].lower() or q in r["vendor_name"].lower()
+            if q in r["vendor_code"].lower()
+            or q in r["vendor_name"].lower()
+            or q == r.get("vendor_type", "").lower()
         ]
 
     def __len__(self):

@@ -156,6 +156,7 @@ class SearchTab(ctk.CTkFrame):
         self._info_section(self.card_frame, "Vendor", [
             (LABELS["vendor_code"], record.get("vendor_code")),
             (LABELS["vendor_name"], record.get("vendor_name")),
+            (LABELS["vendor_type"], record.get("vendor_type")),
         ] + self._email_rows(LABELS["vendor_email"], record.get("vendor_email", "")))
 
         self._info_section(self.card_frame, "Contact Person 1", [

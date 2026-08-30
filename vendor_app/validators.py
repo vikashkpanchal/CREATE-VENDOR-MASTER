@@ -5,10 +5,11 @@ Rules implemented (per business spec):
   * Owner/Supervisor contact numbers must be digits only, when provided.
   * Vendor Name and email fields have no length limits.
   * Multiple emails in "Vendor Email ID" must be separated by ';' (not ',').
+  * Vendor Type is one of exactly two values, CAD or MARKET.
   * All fields other than Vendor Code are optional and never raise on blank.
 """
 
-from vendor_app.config import KEYS
+from vendor_app.config import KEYS, VENDOR_TYPE_VALUES
 
 
 class ValidationError(Exception):
@@ -87,6 +88,26 @@ def validate_single_email_field(value, field_label: str) -> str:
     return text
 
 
+def validate_vendor_type(value, field_label: str) -> str:
+    """CAD or MARKET, in that spelling, or nothing at all.
+
+    Case and surrounding space are forgiven, because a pasted column will
+    not be consistent about them and "cad" plainly means CAD. A third value
+    is not forgiven: silently accepting it would create a category nobody
+    agreed to, and every count by vendor type would then be wrong.
+    """
+    text = normalize(value)
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in VENDOR_TYPE_VALUES:
+        return upper
+    raise ValidationError(
+        field_label,
+        "must be " + " or ".join(VENDOR_TYPE_VALUES) + f" - got '{text}'",
+    )
+
+
 def validate_record(raw: dict) -> dict:
     """Validate and normalize a raw record dict (keyed by KEYS).
 
@@ -115,6 +136,9 @@ def validate_record(raw: dict) -> dict:
     )
     cleaned["vendor_supervisor_email"] = validate_single_email_field(
         raw.get("vendor_supervisor_email", ""), LABELS["vendor_supervisor_email"]
+    )
+    cleaned["vendor_type"] = validate_vendor_type(
+        raw.get("vendor_type", ""), LABELS["vendor_type"]
     )
     return cleaned
 

@@ -25,6 +25,9 @@ KEYS = [
     "vendor_supervisor_name",
     "vendor_supervisor_contact",
     "vendor_supervisor_email",
+    # Appended after the nine mandated fields, never inserted among them, so
+    # the contractual grid/export layout keeps its exact order.
+    "vendor_type",
 ]
 
 # Human-readable labels shown in the grid, search results, master table and
@@ -39,7 +42,15 @@ LABELS = {
     "vendor_supervisor_name": "Contact Person2 Name",
     "vendor_supervisor_contact": "Contact Person2 Contact Number",
     "vendor_supervisor_email": "Contact Person2 Email ID",
+    "vendor_type": "Vendor Type",
 }
+
+# A vendor is one of exactly two things, so the field is a choice rather than
+# free text: a dropdown in the dialog, and anything else rejected on import
+# or in-place edit. Case and surrounding space are forgiven ("cad", " Market ")
+# because a pasted sheet will not be consistent about them; a third value is
+# not, because it would quietly create a category nobody agreed to.
+VENDOR_TYPE_VALUES = ["CAD", "MARKET"]
 
 # Header names used by earlier versions of this app. Kept so that importing a
 # spreadsheet exported before the Owner/Supervisor -> Contact Person1/2 rename
@@ -80,6 +91,7 @@ DISPLAY_COLUMNS = [
     "vendor_supervisor_name",
     "vendor_supervisor_contact",
     "vendor_supervisor_email",
+    "vendor_type",
     "status",
 ]
 
@@ -99,6 +111,7 @@ WRAPPED_LABELS = {
     "vendor_supervisor_name": "Contact Person2\nName",
     "vendor_supervisor_contact": "Contact Person2\nContact Number",
     "vendor_supervisor_email": "Contact Person2\nEmail ID",
+    "vendor_type": "Vendor\nType",
 }
 
 # Per-column pixel widths, sized so the wrapped two-line header above always
@@ -116,6 +129,7 @@ COLUMN_WIDTHS = {
     "vendor_supervisor_name": 190,
     "vendor_supervisor_contact": 180,
     "vendor_supervisor_email": 200,
+    "vendor_type": 130,
 }
 
 # Fields that must contain digits only when provided.
