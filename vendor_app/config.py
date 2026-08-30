@@ -739,3 +739,122 @@ CC_FLOW_LABELS = {
     CC_DEFECTIVE_KEY: "Defective Invoice CC",
     CC_BREAKDOWN_KEY: "Equipment Breakdown CC",
 }
+
+
+# =================================================== ARC value calculation ==
+# Three columns in, one priced annexure out. The input names a machine and
+# how long its order is being extended; everything else is looked up:
+#
+#   Technical ID  -> equipment master : ARC No, MCM/shift + OT codes, their
+#                                       descriptions and rates, validity end
+#   ARC No        -> ARC & FO master  : vendor code, vendor name, plant
+#   Vendor Code   -> vendor master    : vendor type
+#
+ARC_VALUE_INPUT_KEYS = ["technical_id", "extension_date", "working_shift"]
+
+ARC_VALUE_INPUT_LABELS = {
+    "technical_id": "Technical ID",
+    "extension_date": "Extension Date",
+    "working_shift": "Working Shift",
+}
+
+ARC_VALUE_INPUT_WRAPPED_LABELS = {
+    "sr_no": "Sr.\nNo.",
+    "technical_id": "Technical\nID",
+    "extension_date": "Extension\nDate",
+    "working_shift": "Working\nShift",
+}
+
+ARC_VALUE_INPUT_WIDTHS = {
+    "sr_no": 64, "technical_id": 220, "extension_date": 190, "working_shift": 160,
+}
+
+# A machine runs one of two shift patterns, and the shift decides how much
+# overtime a month carries.
+WORKING_SHIFT_VALUES = ["12", "24"]
+
+# Overtime hours earned per working day, by shift length, and the working
+# days in a month. OT quantity = equipment count x months x days x hours.
+OT_HOURS_PER_DAY = {"12": 2, "24": 11}
+WORKING_DAYS_PER_MONTH = 26
+
+# The unit each of the two lines is priced in. The MCM line is a monthly
+# charge; the OT line is priced by the hour.
+MCM_UOM = "MCM"
+OT_UOM = "H"
+
+ARC_VALUE_COLUMNS = [
+    "sr_no",
+    "vendor_code",
+    "vendor_name",
+    "vendor_type",
+    "working_shift",
+    "plant",
+    "arc_no",
+    "service_code",
+    "equipment_description",
+    "eqp_qty",
+    "qty",
+    "uom",
+    "monthly_rate",
+    "value",
+    "existing_upto",
+    "revised_upto",
+]
+
+ARC_VALUE_LABELS = {
+    "sr_no": "Sr. No",
+    "vendor_code": "Vendor Code",
+    "vendor_name": "Vendor Name",
+    "vendor_type": "Vendor Type",
+    "working_shift": "Working Shift",
+    "plant": "Plant",
+    "arc_no": "ARC No",
+    "service_code": "Service Code",
+    "equipment_description": "Equipment Description",
+    "eqp_qty": "Eqp Qty",
+    "qty": "Qty.",
+    "uom": "UOM",
+    "monthly_rate": "Monthly Rate(Rs.)",
+    "value": "Value (Rs.)",
+    "existing_upto": "Existing Order Calculation upto(Date)",
+    "revised_upto": "Revised Order Calculation upto (Date)",
+}
+
+ARC_VALUE_WRAPPED_LABELS = {
+    "sr_no": "Sr.\nNo",
+    "vendor_code": "Vendor\nCode",
+    "vendor_name": "Vendor\nName",
+    "vendor_type": "Vendor\nType",
+    "working_shift": "Working\nShift",
+    "plant": "Plant",
+    "arc_no": "ARC\nNo",
+    "service_code": "Service\nCode",
+    "equipment_description": "Equipment\nDescription",
+    "eqp_qty": "Eqp\nQty",
+    "qty": "Qty.",
+    "uom": "UOM",
+    "monthly_rate": "Monthly Rate\n(Rs.)",
+    "value": "Value\n(Rs.)",
+    "existing_upto": "Existing Order\nCalculation upto",
+    "revised_upto": "Revised Order\nCalculation upto",
+}
+
+ARC_VALUE_COLUMN_WIDTHS = {
+    "sr_no": 64,
+    "vendor_code": 110,
+    "vendor_name": 240,
+    "vendor_type": 110,
+    "working_shift": 100,
+    "plant": 90,
+    "arc_no": 140,
+    "service_code": 110,
+    "equipment_description": 300,
+    "eqp_qty": 90,
+    "qty": 100,
+    "uom": 80,
+    "monthly_rate": 140,
+    "value": 150,
+    "existing_upto": 150,
+    "revised_upto": 150,
+}

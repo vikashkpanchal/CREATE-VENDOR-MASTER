@@ -1,13 +1,14 @@
 """Top-level application window: branded header + the top-level tabs.
 
-The whole application is four things, and the navigation says so:
+The whole application is five things, and the navigation says so:
 
     Vendor Master     Records | Search | Change Log
     Equipment Master  Records | Search | De-mob | Dashboard | Change Log
     ARC & FO Master   Dashboard | Structure | ARC Records | FO Records | Change Log
+    ARC Value Calc.   three input columns priced into a contract annexure
     Communication     Defective Invoice | Equipment Breakdown
 
-Everything else is a sub-tab inside one of those four, so the top bar
+Everything else is a sub-tab inside one of those, so the top bar
 never grows past what a person can scan in one glance. Each top tab (and
 each sub-tab inside it) is built lazily on first visit, so start-up stays
 fast no matter how much the app grows.
@@ -32,6 +33,7 @@ ctk.set_default_color_theme("blue")
 VENDOR_TAB = "Vendor Master"
 EQUIPMENT_TAB = "Equipment Master"
 ARC_TAB = "ARC & FO Master"
+ARC_VALUE_TAB = "ARC Value Calculation"
 COMMUNICATION_TAB = "Communication"
 
 
@@ -94,10 +96,12 @@ class MainWindow(ctk.CTk):
         self.tabview.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
         self._panes = {name: self.tabview.add(name)
-                       for name in (VENDOR_TAB, EQUIPMENT_TAB, ARC_TAB, COMMUNICATION_TAB)}
+                       for name in (VENDOR_TAB, EQUIPMENT_TAB, ARC_TAB,
+                                    ARC_VALUE_TAB, COMMUNICATION_TAB)}
         self.vendor_tab = None
         self.equipment_tab = None
         self.arc_tab = None
+        self.arc_value_tab = None
         self.communication_tab = None
 
         self.tabview.configure(command=self._on_tab_changed)
@@ -133,6 +137,13 @@ class MainWindow(ctk.CTk):
                 on_data_changed=self.refresh_all,
             )
             self.arc_tab.pack(fill="both", expand=True)
+
+        elif name == ARC_VALUE_TAB and self.arc_value_tab is None:
+            from vendor_app.gui.arc_value_tab import ArcValueTab
+            self.arc_value_tab = ArcValueTab(
+                self._panes[name], self.equipment_store, self.arc_store, self.store,
+            )
+            self.arc_value_tab.pack(fill="both", expand=True)
 
         elif name == COMMUNICATION_TAB and self.communication_tab is None:
             from vendor_app.gui.communication_tab import CommunicationTab

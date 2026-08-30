@@ -103,6 +103,7 @@ you can scan in a glance:
 | **Vendor Master** | Records · Search · Change Log |
 | **Equipment Master** | Records · Search · De-mob Equipment · Dashboard · Change Log |
 | **ARC & FO Master** | Dashboard · Structure · ARC Records · FO Records · Change Log |
+| **ARC Value Calculation** | Input · Calculated annexure · Export |
 | **Communication** | Defective Invoice · Equipment Breakdown |
 
 Every tab and sub-tab is built on first visit, so start-up stays fast.
@@ -389,6 +390,70 @@ at**: the row is counted under "No Validity Date" and kept out of every
 expiry bucket, because calling such a contract active - or expired - would
 put the wrong one in front of a reader.
 
+## ARC Value Calculation
+
+Three input columns priced into a contract-amendment annexure. You give it,
+per machine:
+
+| Input | |
+| --- | --- |
+| Technical ID | the machine |
+| Extension Date | what the order is being revised up to |
+| Working Shift | `12` or `24` |
+
+Everything else is looked up:
+
+```
+Technical ID -> equipment master   ARC No, MCM/shift code + Disc (MCM/Shift) +
+                                   rate, OT code + DIC (OT) + rate, validity end
+ARC No       -> ARC & FO master    vendor code, vendor name, plant
+Vendor Code  -> vendor master      vendor type
+```
+
+Two dates drive the whole calculation:
+
+- **Existing Order Calculation upto** = the equipment's Validity End Date
+- **Revised Order Calculation upto** = the Extension Date you gave
+
+and the **months between them are the MCM quantity** — counted on the
+calendar, so 28.02.2026 to 31.12.2026 is 10 months.
+
+**Machines are counted, not listed.** Within one contract, every machine
+sharing the same MCM code, description, rates, OT code, shift and pair of
+dates becomes one line, with the count in **Eqp Qty**. Anything that differs
+— a different rate, a 24-hour deployment beside a 12-hour one, a different
+extension date — is its own line, because those cannot share a quantity or a
+value.
+
+Each line prints as one row, or two when the machine carries overtime:
+
+| | Service Code | Equipment Description | UOM | Monthly Rate | Qty. | Value |
+| --- | --- | --- | --- | --- | --- | --- |
+| MCM row | MCM/Shift Code | Disc (MCM/Shift) | `MCM` | MCM/shift rate | months | Eqp Qty × months × rate |
+| OT row *(only when an OT code exists)* | OT Code | DIC (OT) | `H` | OT rate | Eqp Qty × months × 26 × hours/day | Qty × rate |
+
+Overtime hours per working day come from the shift: **2** on a 12-hour
+deployment, **11** on a 24-hour one, over **26** working days a month. The
+Eqp Qty sits on the MCM row only — it is already inside the OT quantity, so
+repeating it there would double the overtime value.
+
+Contracts are ordered **oldest first**, by the ARC's own validity start (then
+its document date, then its number); within a contract the categories stay in
+the order the input named them. Each contract gets a **subtotal row** for Eqp
+Qty and Value, and the sheet ends with a grand total, banded as they are in
+the source workbook.
+
+Anything that cannot be priced is listed under **NOT PRICED** rather than
+dropped — a Technical ID not in the equipment master, a shift that is not
+12 or 24, an unreadable Extension Date, an extension that is not after the
+validity end, a machine with no ARC No, or an ARC that is not in the ARC & FO
+master (that one still prices, using the equipment record's own vendor and
+plant, and says so).
+
+The export is a formatted `.xlsx` with those sixteen columns. Quantities,
+rates and values are written as **numbers**, so the sheet sums and filters in
+Excel; the two dates stay `DD.MM.YYYY` text.
+
 ## Communication
 
 Drafts vendor emails from pasted data. **One email per vendor** - a vendor
@@ -478,6 +543,7 @@ vendor_app/
   equipment.py                EquipmentStore: equipment master, lookups, de-mob
   arc.py                      ArcStore: Table 1 + Table 2, with entity roll-up
   arc_analytics.py            the 19 ARC/FO analyses: expiry, gaps, risk, vendors
+  arc_value.py                ARC value calculation: input rows -> priced annexure
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
   outlook.py                  Outlook draft creation (Windows/pywin32)
@@ -497,7 +563,7 @@ vendor_app/
     filter_dropdown.py           Excel-style multi-select cascading filter
     paste_grid.py                reusable Excel-like paste grid (Ctrl+V)
     paste_dialog.py              "Paste Rows" dialog built on the paste grid
-    main_window.py               app shell, branded header, 4 top-level tabs
+    main_window.py               app shell, branded header, 5 top-level tabs
     master_tabs.py                Vendor / Equipment master tabs + sub-tab host
     records_screen.py             shared editable master records screen
     master_screens.py             the two concrete master records screens
@@ -509,6 +575,7 @@ vendor_app/
     arc_screens.py                 the Table 1 and Table 2 records screens
     arc_structure_tab.py           the contract -> item / frame order view
     arc_dashboard_tab.py           ARC & FO management dashboard
+    arc_value_tab.py               ARC value calculation: input, result, export
     arc_dialogs.py                 contract-item and frame-order-item modals
     dashboard_tab.py               interactive equipment analytics
     audit_tab.py                   change log screen (serves both masters)

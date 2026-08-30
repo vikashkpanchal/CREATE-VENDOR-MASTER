@@ -195,3 +195,75 @@ def export_arc_analysis_to_excel(analysis, path: str) -> str:
             frame.to_excel(writer, index=False, sheet_name=sheet)
             _style_worksheet(writer.sheets[sheet], headers)
     return path
+
+
+def export_arc_value_to_excel(lines: list, path: str, title: str = "") -> str:
+    """The priced ARC value annexure.
+
+    Quantities, rates and values are written as NUMBERS, not text, so the
+    sheet can be summed and filtered in Excel the way the original annexure
+    is; the two dates stay text in DD.MM.YYYY, which is the one shape they
+    are ever shown in. Each contract's subtotal row and the grand total are
+    banded and bold, as they are in the source workbook.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from vendor_app.arc_value import LINE_ARC_TOTAL, LINE_GRAND_TOTAL
+    from vendor_app.config import ARC_VALUE_COLUMNS, ARC_VALUE_LABELS
+
+    NUMERIC = {"eqp_qty", "qty", "monthly_rate", "value"}
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "ARC Value Calculation"
+
+    row_index = 1
+    if title:
+        sheet.cell(row=1, column=1, value=title).font = Font(bold=True, size=12)
+        row_index = 3
+
+    header_row = row_index
+    headers = [ARC_VALUE_LABELS[key] for key in ARC_VALUE_COLUMNS]
+    for column, name in enumerate(headers, start=1):
+        cell = sheet.cell(row=header_row, column=column, value=name)
+        cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
+        cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
+        cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+
+    total_fill = PatternFill("solid", fgColor="DCE6F1")
+    thin = Side(style="thin", color="BFBFBF")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for offset, line in enumerate(lines, start=1):
+        is_total = line["kind"] in (LINE_ARC_TOTAL, LINE_GRAND_TOTAL)
+        for column, key in enumerate(ARC_VALUE_COLUMNS, start=1):
+            value = line.get(key, "")
+            if key in NUMERIC and value not in ("", None):
+                value = float(value)
+            cell = sheet.cell(row=header_row + offset, column=column, value=value)
+            cell.border = border
+            if key in NUMERIC:
+                cell.number_format = "#,##0" if key != "monthly_rate" else "#,##0.00"
+                cell.alignment = Alignment(horizontal="right")
+            if is_total:
+                cell.fill = total_fill
+                cell.font = Font(bold=True)
+
+    for column, name in enumerate(headers, start=1):
+        letter = sheet.cell(row=header_row, column=column).column_letter
+        longest = max(
+            [len(name)]
+            + [len(str(sheet.cell(row=r, column=column).value or ""))
+               for r in range(header_row + 1, header_row + len(lines) + 1)]
+        )
+        sheet.column_dimensions[letter].width = min(max(longest + 3, 11), 42)
+
+    sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
+    sheet.row_dimensions[header_row].height = 34
+    sheet.auto_filter.ref = (
+        f"A{header_row}:"
+        f"{sheet.cell(row=header_row, column=len(headers)).column_letter}"
+        f"{header_row + len(lines)}"
+    )
+    book.save(path)
+    return path
