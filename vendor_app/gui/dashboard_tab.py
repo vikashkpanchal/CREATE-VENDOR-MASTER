@@ -6,7 +6,7 @@ from that same filtered set, so what you see always agrees with itself.
 The filtered rows are exportable exactly as shown.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from collections import Counter
 from tkinter import filedialog, messagebox
 
@@ -16,6 +16,7 @@ from vendor_app.config import (
     EQUIPMENT_COLUMN_WIDTHS, EQUIPMENT_KEYS, EQUIPMENT_LABELS, EQUIPMENT_WRAPPED_LABELS,
     FLEET_ALL, FLEET_DEMOB, FLEET_RUNNING, FLEET_FILTER_VALUES,
 )
+from vendor_app.arc import parse_date
 from vendor_app.equipment import is_demobbed
 from vendor_app.export import export_equipment_to_excel
 from vendor_app.gui import theme
@@ -213,7 +214,8 @@ class DashboardTab(ctk.CTkFrame):
             ("vendors", "Suppliers"),
             ("categories", "Equipment Types"),
             ("plants", "Plants"),
-            ("expiring", "Validity < 30 days"),
+            ("expired", "Expired Equipment"),
+            ("expiring", "Expiring in 30 Days"),
         ):
             box = card(strip, fg_color=theme.BG_CARD)
             box.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -350,7 +352,9 @@ class DashboardTab(ctk.CTkFrame):
         self.kpi["plants"].configure(
             text=f"{len({r.get('plant') for r in records if r.get('plant')}):,}"
         )
-        self.kpi["expiring"].configure(text=f"{self._expiring_count(records):,}")
+        expired, expiring = self._validity_counts(records)
+        self.kpi["expired"].configure(text=f"{expired:,}")
+        self.kpi["expiring"].configure(text=f"{expiring:,}")
 
         self.vendor_chart.set_data(self._top(records, "vendor_name"))
         self.category_chart.set_data(self._top(records, "equipment_description"))
@@ -402,23 +406,26 @@ class DashboardTab(ctk.CTkFrame):
         return counts.most_common(limit)
 
     @staticmethod
-    def _expiring_count(records):
-        """Contracts whose validity ends within 30 days (or already has)."""
-        today = datetime.now().date()
-        count = 0
+    def _validity_counts(records):
+        """(already expired, expiring within 30 days) by Validity End Date.
+
+        Two separate numbers, not one: a machine whose validity has already
+        run out is a different problem from one that is about to, and rolling
+        them together hides the first inside the second. A date that cannot
+        be read is counted as neither rather than guessed at.
+        """
+        today = date.today()
+        expired = expiring = 0
         for record in records:
-            raw = str(record.get("validity_end_date", "")).strip()
-            if not raw:
+            end = parse_date(record.get("validity_end_date", ""))
+            if end is None:
                 continue
-            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d-%b-%Y", "%Y/%m/%d"):
-                try:
-                    end = datetime.strptime(raw, fmt).date()
-                except ValueError:
-                    continue
-                if (end - today).days <= 30:
-                    count += 1
-                break
-        return count
+            days = (end - today).days
+            if days < 0:
+                expired += 1
+            elif days <= 30:
+                expiring += 1
+        return expired, expiring
 
     # ------------------------------------------------------------- export --
     def export_filtered(self):

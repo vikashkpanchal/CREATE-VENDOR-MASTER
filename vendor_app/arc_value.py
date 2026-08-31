@@ -241,6 +241,35 @@ class ArcValueCalculator:
 
         return self._lines(groups), problems
 
+    def _arc_summary(self, serial, categories, impact):
+        """One Annexure 1 row: the contract as it stands, and this amendment.
+
+        The revised validity end is the LATEST of the contract's own end date
+        and every revised date priced against it here - extending one machine
+        to a date beyond the contract necessarily extends the contract.
+        """
+        arc_no = categories[0]["arc_no"]
+        header = self._arc_header(arc_no)
+        existing_value = parse_amount(header.get("target_value", ""))
+
+        candidates = [parse_date(header.get("validity_end", ""))]
+        candidates += [parse_date(group["revised"]) for group in categories]
+        latest = max([d for d in candidates if d is not None], default=None)
+
+        return {
+            "sr_no": serial,
+            "arc_no": arc_no,
+            "work_order_date": format_date(header.get("document_date", "")),
+            "plant": categories[0]["plant"],
+            "vendor_code": categories[0]["vendor_code"],
+            "vendor_name": categories[0]["vendor_name"],
+            "existing_value": existing_value,
+            "impact": impact,
+            "revised_value": existing_value + impact,
+            "validity_start": format_date(header.get("validity_start", "")),
+            "validity_end": latest.strftime("%d.%m.%Y") if latest else "",
+        }
+
     def _lines(self, groups):
         """Group the categories under their contracts and price each one."""
         by_arc = OrderedDict()
@@ -329,6 +358,10 @@ class ArcValueCalculator:
                 "eqp_qty": arc_eqp, "qty": "", "uom": "", "monthly_rate": "",
                 "value": arc_value, "existing_upto": "", "revised_upto": "",
                 "machines": [],
+                # What Annexure 1 needs about this contract, computed here so
+                # the summary is a roll-up of these very rows rather than a
+                # second, independently derived answer.
+                "summary": self._arc_summary(serial, categories, arc_value),
             })
             grand_eqp += arc_eqp
             grand_value += arc_value

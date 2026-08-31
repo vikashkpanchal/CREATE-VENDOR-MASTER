@@ -28,6 +28,8 @@ KEYS = [
     # Appended after the nine mandated fields, never inserted among them, so
     # the contractual grid/export layout keeps its exact order.
     "vendor_type",
+    "city",
+    "state",
 ]
 
 # Human-readable labels shown in the grid, search results, master table and
@@ -43,6 +45,8 @@ LABELS = {
     "vendor_supervisor_contact": "Contact Person2 Contact Number",
     "vendor_supervisor_email": "Contact Person2 Email ID",
     "vendor_type": "Vendor Type",
+    "city": "City",
+    "state": "State",
 }
 
 # A vendor is one of exactly two things, so the field is a choice rather than
@@ -92,6 +96,8 @@ DISPLAY_COLUMNS = [
     "vendor_supervisor_contact",
     "vendor_supervisor_email",
     "vendor_type",
+    "city",
+    "state",
     "status",
 ]
 
@@ -112,6 +118,8 @@ WRAPPED_LABELS = {
     "vendor_supervisor_contact": "Contact Person2\nContact Number",
     "vendor_supervisor_email": "Contact Person2\nEmail ID",
     "vendor_type": "Vendor\nType",
+    "city": "City",
+    "state": "State",
 }
 
 # Per-column pixel widths, sized so the wrapped two-line header above always
@@ -130,6 +138,8 @@ COLUMN_WIDTHS = {
     "vendor_supervisor_contact": 180,
     "vendor_supervisor_email": 200,
     "vendor_type": 130,
+    "city": 160,
+    "state": 170,
 }
 
 # Fields that must contain digits only when provided.
@@ -219,6 +229,8 @@ EQUIPMENT_KEYS = [
     "ot_code",
     "dic_ot",
     "ot_rate",
+    "shift",
+    "lease_type",
 ]
 
 EQUIPMENT_LABELS = {
@@ -244,6 +256,8 @@ EQUIPMENT_LABELS = {
     "ot_code": "OT Code",
     "dic_ot": "DIC (OT)",
     "ot_rate": "OT Rate",
+    "shift": "Shift",
+    "lease_type": "Lease Type",
 }
 
 EQUIPMENT_WRAPPED_LABELS = {
@@ -270,6 +284,8 @@ EQUIPMENT_WRAPPED_LABELS = {
     "ot_code": "OT\nCode",
     "dic_ot": "DIC\n(OT)",
     "ot_rate": "OT\nRate",
+    "shift": "Shift",
+    "lease_type": "Lease\nType",
 }
 
 EQUIPMENT_COLUMN_WIDTHS = {
@@ -296,9 +312,15 @@ EQUIPMENT_COLUMN_WIDTHS = {
     "ot_code": 110,
     "dic_ot": 110,
     "ot_rate": 110,
+    "shift": 100,
+    "lease_type": 120,
 }
 
 # Equipment lookup keys: pasting any ONE of these retrieves the full record.
+# A machine is hired one of two ways, so Lease Type is a choice rather than
+# free text - the same rule Vendor Type follows.
+LEASE_TYPE_VALUES = ["DRY", "WET"]
+
 EQUIPMENT_LOOKUP_KEYS = ["rh_ro_number", "technical_id", "reg_no"]
 
 # Technical ID is numeric; RH/RO Number is alphanumeric; Reg No is free text.
@@ -838,6 +860,26 @@ ARC_VALUE_WRAPPED_LABELS = {
     "value": "Value\n(Rs.)",
     "existing_upto": "Existing Order\nCalculation upto",
     "revised_upto": "Revised Order\nCalculation upto",
+}
+
+# Annexure 1: one row per contract, summarising Annexure 2.
+ARC_SUMMARY_COLUMNS = [
+    "sr_no", "arc_no", "work_order_date", "plant", "vendor_code", "vendor_name",
+    "existing_value", "revised_value", "impact", "validity_start", "validity_end",
+]
+
+ARC_SUMMARY_LABELS = {
+    "sr_no": "Sr no.",
+    "arc_no": "ARC No.",
+    "work_order_date": "Work Order Date",
+    "plant": "Plant",
+    "vendor_code": "Vendor Code",
+    "vendor_name": "Vendor Name",
+    "existing_value": "Existing ARC value (Rs.)",
+    "revised_value": "Revised Arc Value (Rs.)",
+    "impact": "Impact (Rs.)",
+    "validity_start": "ARC Validity Start Date",
+    "validity_end": "ARC Validity End Date",
 }
 
 ARC_VALUE_COLUMN_WIDTHS = {

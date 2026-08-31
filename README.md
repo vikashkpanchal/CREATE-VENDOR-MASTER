@@ -40,15 +40,27 @@ Every vendor record uses this exact field order:
 | 9 | Contact Person2 Contact Number | Optional; digits only if provided |
 | 10 | Contact Person2 Email ID | Optional; single address |
 | 11 | Vendor Type | Optional; **CAD or MARKET only** |
+| 12 | City | Optional |
+| 13 | State | Optional |
 
 Sheets exported by older builds (which used "Vendor Owner ..." /
 "Vendor Supervisor ..." headers, and split emails across "Vendor Email ID
 1/2/3" columns) still import correctly.
 
 The 9 core fields (plus generated Sr. No.) are the exact, contractual
-layout for the bulk-entry grid and the `.xlsx` export. **Vendor Type is
+layout for the bulk-entry grid and the `.xlsx` export. **Vendor Type, City and State are
 appended after them, never inserted among them**, so that order is
 untouched — as is the operational metadata below.
+
+### A vendor with equipment on site stays Active
+
+A vendor cannot be set Inactive or Blocked while machines are still running
+under its name — the attempt is refused, naming how many. Closing one would
+leave equipment on the ground belonging to a vendor the system says is
+finished, and every count of active suppliers, every breakdown email and
+every ARC raised against them would be reasoning from a vendor that is not
+supposed to exist. De-mob the machines first; the vendor closes the moment
+the last one is off site.
 
 ### Vendor Type
 
@@ -155,6 +167,12 @@ RO/RH, Vendor Code, Vendor Name, RH/RO Number, Technical ID, Reg No, RH Date,
 Code, Validity End Date, ARC No, FO No, MCM/Shift Code, Disc (MCM/Shift),
 MCM/Shift Rate, OT Code, DIC (OT), OT Rate**.
 
+### Shift and Lease Type
+
+Two more columns on every machine: **Shift**, and **Lease Type**, which is
+`DRY` or `WET` and nothing else — a dropdown in the record dialog, and the
+same forgiving-case, reject-anything-else rule Vendor Type follows.
+
 ### Running vs de-mobbed
 
 A machine with a **De-mob Date** has left site. That record is **closed**:
@@ -172,6 +190,15 @@ the next, with a fallback date for any blanks. It reports what was closed,
 what was already closed, and anything it could not find, and lists every
 de-mobbed machine alongside as read-only.
 
+That list has its own **Export (.xlsx)**, **Import De-mob...** and **Delete
+Selected**. The import matches *closed* records only, so re-importing a list
+this app exported updates those same rows instead of creating a second copy
+of every machine, and it can never reopen or silently close a machine that is
+currently on site — closing one is the De-mob action's job, which writes its
+own change-log entry. Every imported row must carry a De-mob Date; that is
+what makes it a closed record. Delete removes closed records from the master
+permanently.
+
 Any one of RH/RO Number, Technical ID or Reg No identifies a machine, so
 search and import both work from whichever you have; rows are matched and
 merged on any shared identifier. Technical ID must be numeric.
@@ -182,9 +209,15 @@ An interactive analytics view over the fleet. It opens on **Running
 Equipment**; the Fleet filter switches to de-mobbed machines or to
 everything.
 
-The filter panel is a uniform grid that **reflows to the window width** -
-narrow the app and the filters wrap onto another line rather than running off
-the right edge, so every one of them stays reachable.
+Its KPI tiles include **Expired Equipment** — machines whose Validity End
+Date is already behind us — and **Expiring in 30 Days**, kept as two separate
+numbers rather than one: a machine whose validity has run out is a different
+problem from one that is about to, and rolling them together hides the first
+inside the second. A date that cannot be read is counted as neither.
+
+The filter panel is **two rows of four**, always: capping the column count is
+what keeps all eight filters on screen rather than spread into one strip that
+runs off the edge of a laptop.
 
 The dimension filters (**vendor, equipment, capacity, RO/RH, plant, plant
 code**) behave
@@ -263,11 +296,12 @@ Purchasing Document  (the contract - the key everything is filed against)
   `00010`). Only the *form* of a number is normalised; two genuinely
   different numbers can never collide.
 - **ARC Without FO** therefore means exactly what it says: a purchasing
-  document that no row in Table 2 names as its Contract No. Its companion
-  section, **FO Without a Contract**, is the other side of the same join, and
-  when both are non-empty the first one says so - two long lists at once mean
-  the files are not lining up, which is a different problem from a contract
-  genuinely having no orders.
+  document that no row in Table 2 names as its Contract No. When frame orders
+  name a contract that is not in Table 1 at all, that section says so - the
+  two problems together mean the files are not lining up, which is different
+  from a contract genuinely having no orders. Those rows are listed on the
+  **FO Without a Contract** sheet of the export: a data-quality answer rather
+  than a management figure, so not a dashboard section.
 - A frame order whose Contract No. matches no document is **not dropped** - it
   is grouped under "(no contract on file)", counted on its own KPI tile, and
   still credited to its vendor, so a typo stays visible.
@@ -350,9 +384,10 @@ this page can always be taken apart into the rows it came from.
 
 **KPI cards** - Total ARC · Active ARC · Expired ARC · ARC Without FO ·
 Total ARC Value · Total FO · Total FO Value · ARC Expiring in 30 Days ·
-FO Expiring in 30 Days · Pending Approval (S) · FO Without a Contract. They
-reflow into as many columns as the window fits, so none is ever pushed off
-the edge.
+FO Expiring in 30 Days · Pending Approval (S). They reflow into as many
+columns as the window fits, so none is ever pushed off the edge, and a
+figure's type size steps down as it gets longer so a crore-scale total is
+read rather than clipped.
 
 **Sections, in the order the questions get asked:**
 
@@ -361,7 +396,6 @@ the edge.
 | ARC Expiry Analysis | status donut, release position, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
 | FO Expiry Analysis | the same read on the frame orders - which need extending |
 | ARC Without FO | a contract against which not one frame order has been raised, biggest first |
-| FO Without a Contract | the other side of that join - a frame order naming a Contract No. that is not in Table 1 |
 | Pending Approval | release indicator `S` - nothing can be ordered against these yet, furthest through the approval chain first |
 | ARC vs FO Value Difference | `Target Val. (Header) - released against it`, ranked by the size of the gap either way |
 | Vendor Analysis | contract value against released value per vendor, as paired bars and as a table |
@@ -450,9 +484,36 @@ validity end, a machine with no ARC No, or an ARC that is not in the ARC & FO
 master (that one still prices, using the equipment record's own vendor and
 plant, and says so).
 
-The export is a formatted `.xlsx` with those sixteen columns. Quantities,
-rates and values are written as **numbers**, so the sheet sums and filters in
-Excel; the two dates stay `DD.MM.YYYY` text.
+### The workbook
+
+Two sheets, Calibri 10 throughout, headers and totals bold, total rows on a
+very light blue.
+
+**Annexure 2** is the calculation, with those sixteen columns. Every
+multiplication and every total is written as a live Excel **formula**, not a
+number this app worked out — `=J4*K4*M4` for a line's value, `=J4*K4*26*2`
+for an overtime quantity, `=SUBTOTAL(9,...)` for each contract's subtotal and
+the grand total. The sheet can be audited cell by cell, a rate corrected in
+place, and everything above and below it follows. `SUBTOTAL` also ignores the
+nested subtotals in its own range and re-totals whatever a filter leaves
+visible, which is how the source workbook does it.
+
+**Annexure 1** summarises it, one row per ARC, in Annexure 2's own contract
+order:
+
+| Column | Where it comes from |
+| --- | --- |
+| Sr no., ARC No. | the contract |
+| Work Order Date | the ARC record's Document Date |
+| Plant, Vendor Code, Vendor Name | as on the priced rows |
+| Existing ARC value (Rs.) | the ARC record's Target Val. (Header) |
+| Impact (Rs.) | **read from Annexure 2's subtotal cell** — `='Annexure 2'!N6` |
+| Revised Arc Value (Rs.) | `= Existing + Impact` |
+| ARC Validity Start Date | the ARC record's Validity Per. Start |
+| ARC Validity End Date | the **latest** of the ARC's own validity end and every revised date priced against it — extending one machine past the contract necessarily extends the contract |
+
+Because Impact is a reference rather than a copy, the two sheets cannot
+drift: correct a rate in Annexure 2 and Annexure 1 follows.
 
 ## Communication
 
@@ -501,6 +562,12 @@ Every grid in the app shares the same behaviour:
   at any row height, and a column is never drawn narrower than its own title -
   the header is the only thing on screen that says what a column *is*, so it
   is the one piece of text that is never allowed to be cut.
+- **Big grids stay fast.** Every "which frame orders belong to this
+  contract", "what has been released against it" and "what does this frame
+  order add up to" comes off one index built in a single pass and dropped
+  whenever either table changes, instead of re-scanning the other table per
+  row per column. On 1,200 contract items and 2,700 frame-order rows that
+  took the ARC read path from **28.7s to 0.20s**.
 - **Row height is adjustable** - Compact, Normal, Tall or Extra tall - from
   the control above each grid. The dashboard has one control for all its
   tables; each drill-down pop-up has its own.

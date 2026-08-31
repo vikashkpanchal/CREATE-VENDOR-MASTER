@@ -256,7 +256,8 @@ class _Table:
     export therefore updates the same rows instead of doubling them.
     """
 
-    def __init__(self, path, keys, key_fields, validator, legacy=None, legacy_fn=None):
+    def __init__(self, path, keys, key_fields, validator, legacy=None, legacy_fn=None,
+                 on_change=None):
         self.path = path
         self.keys = list(keys)
         self.key_fields = tuple(key_fields)
@@ -265,6 +266,9 @@ class _Table:
         # For a legacy column that has no single new home - two old columns
         # folded into one, say - a store may pass a function instead.
         self.legacy_fn = legacy_fn
+        # Called whenever the rows change, so the store can drop the lookup
+        # index it builds over them.
+        self.on_change = on_change
         self.records = []
         self.load()
 
@@ -300,10 +304,16 @@ class _Table:
                 self.legacy_fn(record, row)
             if any(record.values()):
                 self.records.append(record)
+        self.changed()
+
+    def changed(self):
+        if self.on_change is not None:
+            self.on_change()
 
     def save(self):
         os.makedirs(DATA_DIR, exist_ok=True)
         pd.DataFrame(self.records, columns=self.keys).to_csv(self.path, index=False)
+        self.changed()
 
     def find(self, key):
         """`key` is a tuple of the key columns, or a row id string."""
@@ -340,11 +350,19 @@ class ArcStore:
         # vendor master the same way an equipment row creates one.
         self.vendor_store = vendor_store
         self._lock = threading.RLock()
+        # Every read below - which frame orders belong to a contract, what a
+        # contract has had released against it, what a frame order adds up to
+        # - used to be a full scan of the other table. On a few thousand rows
+        # that is a scan per row per column, and the grids crawled. They now
+        # come off one index, built lazily and thrown away whenever either
+        # table changes, so the answers can never be stale.
+        self._index = None
         self.arcs = _Table(ARC_FILE if arc_path is None else arc_path,
                            ARC_KEYS, ARC_KEY_FIELDS, validate_arc, ARC_LEGACY_COLUMNS,
-                           legacy_fn=self._legacy_vendor)
+                           legacy_fn=self._legacy_vendor, on_change=self._invalidate)
         self.fos = _Table(FO_FILE if fo_path is None else fo_path,
-                          FO_KEYS, FO_KEY_FIELDS, validate_fo, FO_LEGACY_COLUMNS)
+                          FO_KEYS, FO_KEY_FIELDS, validate_fo, FO_LEGACY_COLUMNS,
+                          on_change=self._invalidate)
 
     @staticmethod
     def _legacy_vendor(record, row):
@@ -382,6 +400,69 @@ class ArcStore:
             return None
         return (code, name)
 
+    # ------------------------------------------------------------- index --
+    def _invalidate(self):
+        self._index = None
+
+    def _build_index(self):
+        """One pass over both tables; every read below is a dict lookup after."""
+        documents = OrderedDict()
+        for record in self.arcs.records:
+            key = document_key(record.get("purchasing_document", ""))
+            entry = documents.get(key)
+            if entry is None:
+                entry = documents[key] = {
+                    "document": normalize(record.get("purchasing_document", "")),
+                    "header": {field: "" for field in ARC_HEADER_KEYS},
+                    "items": [],
+                }
+            entry["items"].append(record)
+            header = entry["header"]
+            # The header is whatever the first row carrying each field says:
+            # an export can leave a repeated cell blank on continuation rows,
+            # and the contract still has one value for it.
+            for field in ARC_HEADER_KEYS:
+                if not header[field]:
+                    header[field] = normalize(record.get(field, ""))
+
+        fos_by_contract = {}
+        items_by_frame = OrderedDict()
+        frames_by_contract = OrderedDict()
+        released_by_contract = {}
+        frame_totals = {}
+        for record in self.fos.records:
+            contract = document_key(record.get("contract_no", ""))
+            fos_by_contract.setdefault(contract, []).append(record)
+
+            written = normalize(record.get("frame_numbers", ""))
+            frame = document_key(written)
+            items_by_frame.setdefault(frame, []).append(record)
+            if frame:
+                seen = frames_by_contract.setdefault(contract, OrderedDict())
+                seen.setdefault(frame, written)
+
+            released = parse_amount(record.get("released_value", ""))
+            released_by_contract[contract] = released_by_contract.get(contract, 0.0) + released
+            totals = frame_totals.setdefault(
+                frame, {"released_value": 0.0, "actual_value": 0.0, "opening_value": 0.0}
+            )
+            for field in totals:
+                totals[field] += parse_amount(record.get(field, ""))
+
+        return {
+            "documents": documents,
+            "fos_by_contract": fos_by_contract,
+            "items_by_frame": items_by_frame,
+            "frames_by_contract": frames_by_contract,
+            "released_by_contract": released_by_contract,
+            "frame_totals": frame_totals,
+        }
+
+    def _idx(self):
+        if self._index is None:
+            self._index = self._build_index()
+        return self._index
+
     # ------------------------------------------------------------- reads --
     def all_arcs(self):
         return list(self.arcs.records)
@@ -390,9 +471,8 @@ class ArcStore:
         return list(self.fos.records)
 
     def items_for_document(self, document):
-        needle = document_key(document)
-        return [r for r in self.arcs.records
-                if document_key(r.get("purchasing_document", "")) == needle]
+        entry = self._idx()["documents"].get(document_key(document))
+        return list(entry["items"]) if entry else []
 
     def fos_for_document(self, document):
         """Every Table 2 row whose Contract No. names this document.
@@ -401,14 +481,10 @@ class ArcStore:
         see document_key. Matching the raw text here is what would report a
         contract with frame orders as having none.
         """
-        needle = document_key(document)
-        return [r for r in self.fos.records
-                if document_key(r.get("contract_no", "")) == needle]
+        return list(self._idx()["fos_by_contract"].get(document_key(document), []))
 
     def items_for_frame(self, frame):
-        needle = document_key(frame)
-        return [r for r in self.fos.records
-                if document_key(r.get("frame_numbers", "")) == needle]
+        return list(self._idx()["items_by_frame"].get(document_key(frame), []))
 
     def frames_for_document(self, document):
         """The distinct frame orders raised against a contract.
@@ -416,42 +492,14 @@ class ArcStore:
         Distinct by canonical frame number, but each is reported as it was
         written, so the screen shows what is in the file.
         """
-        seen = OrderedDict()
-        for row in self.fos_for_document(document):
-            written = normalize(row.get("frame_numbers", ""))
-            key = document_key(written)
-            if key:
-                seen.setdefault(key, written)
-        return list(seen.values())
+        seen = self._idx()["frames_by_contract"].get(document_key(document))
+        return list(seen.values()) if seen else []
 
     # --------------------------------------------------------- roll-ups --
     def documents(self):
-        """One entry per purchasing document, header read once.
-
-        The header fields are taken from the first row that carries them
-        rather than from row zero blindly - an export can leave a repeated
-        cell blank on continuation rows, and the contract still has one
-        target value, one validity and one release state.
-        """
-        grouped = OrderedDict()
-        written = {}
-        for record in self.arcs.records:
-            key = document_key(record.get("purchasing_document", ""))
-            grouped.setdefault(key, []).append(record)
-            # Keyed canonically so a document written two ways is one
-            # contract, but shown as the file wrote it the first time.
-            written.setdefault(key, normalize(record.get("purchasing_document", "")))
-
-        documents = OrderedDict()
-        for key, rows in grouped.items():
-            header = {}
-            for field in ARC_HEADER_KEYS:
-                header[field] = next(
-                    (normalize(r.get(field, "")) for r in rows if normalize(r.get(field, ""))),
-                    "",
-                )
-            documents[key] = {"document": written[key], "header": header, "items": rows}
-        return documents
+        """One entry per purchasing document, keyed canonically, header read
+        once. Read-only: it is the store's own index, not a copy."""
+        return self._idx()["documents"]
 
     def header_for(self, document):
         entry = self.documents().get(document_key(document))
@@ -468,16 +516,15 @@ class ArcStore:
 
     def frame_released(self, frame) -> float:
         """What one frame order has released: its items DO add up."""
-        return sum(parse_amount(r.get("released_value", ""))
-                   for r in self.items_for_frame(frame))
+        return self.frame_value(frame, "released_value")
 
     def frame_value(self, frame, key) -> float:
-        return sum(parse_amount(r.get(key, "")) for r in self.items_for_frame(frame))
+        totals = self._idx()["frame_totals"].get(document_key(frame))
+        return totals[key] if totals else 0.0
 
     def released_against(self, document) -> float:
         """Released against a contract: every item of every frame order on it."""
-        return sum(parse_amount(r.get("released_value", ""))
-                   for r in self.fos_for_document(document))
+        return self._idx()["released_by_contract"].get(document_key(document), 0.0)
 
     def value_gap(self, document) -> float:
         """Target Val. (Header) - what has been released against it.
@@ -518,18 +565,19 @@ class ArcStore:
         return enriched
 
     def summary(self) -> dict:
-        documents = self.documents()
+        index = self._idx()
+        documents = index["documents"]
         target = sum(parse_amount(e["header"].get("target_value", ""))
                      for e in documents.values())
-        released = sum(parse_amount(r.get("released_value", ""))
-                       for r in self.fos.records)
+        released = sum(index["released_by_contract"].values())
         known = set(documents)          # already canonical keys
         orphan_frames = {
             document_key(r.get("frame_numbers", ""))
-            for r in self.fos.records
-            if document_key(r.get("contract_no", "")) not in known
+            for contract, rows in index["fos_by_contract"].items()
+            if contract not in known
+            for r in rows
         }
-        frames = {document_key(r.get("frame_numbers", "")) for r in self.fos.records}
+        frames = set(index["items_by_frame"])
         return {
             "arcs": len(documents),
             "arc_items": len(self.arcs.records),

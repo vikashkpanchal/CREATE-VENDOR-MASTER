@@ -11,7 +11,7 @@ record, which:
 """
 
 from datetime import datetime
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -23,7 +23,11 @@ from vendor_app.gui.editable_table import EditableTable
 from vendor_app.gui.loading import run_with_loading
 from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.toast import notify
-from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label, wrap_children
+from vendor_app.export import export_equipment_to_excel
+from vendor_app.gui.widgets import (
+    card, danger_button, pill, primary_button, secondary_button, section_label,
+    wrap_children,
+)
 
 COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
 
@@ -33,6 +37,7 @@ class DemobTab(ctk.CTkFrame):
         super().__init__(master, fg_color=theme.BG_SURFACE)
         self.store = equipment_store
         self.on_data_changed = on_data_changed
+        self._rows = {}
         self._build()
         self.refresh()
 
@@ -103,16 +108,35 @@ class DemobTab(ctk.CTkFrame):
 
         toolbar = ctk.CTkFrame(right, fg_color="transparent")
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        # Reserved column for the actions, so a long caption cannot push them
+        # off the right edge.
+        toolbar.grid_columnconfigure(0, weight=1)
+        toolbar.grid_columnconfigure(1, weight=0)
+
+        caption = ctk.CTkFrame(toolbar, fg_color="transparent")
+        caption.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(
-            toolbar, text="Already de-mobbed", font=theme.h2_font(),
+            caption, text="Already de-mobbed", font=theme.h2_font(),
             text_color=theme.TEXT_PRIMARY,
         ).pack(side="left")
-        self.count_pill = pill(toolbar, "0", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
+        self.count_pill = pill(caption, "0", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
         self.count_pill.pack(side="left", padx=12)
         ctk.CTkLabel(
-            toolbar, text="These records are locked and read-only.",
+            caption, text="Locked and read-only.",
             font=theme.small_font(), text_color=theme.TEXT_MUTED,
         ).pack(side="left")
+
+        actions = ctk.CTkFrame(toolbar, fg_color="transparent")
+        actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        secondary_button(actions, "Import De-mob...", self.import_demobbed, width=160).pack(
+            side="left", padx=(0, 8)
+        )
+        secondary_button(actions, "Export (.xlsx)", self.export_demobbed, width=140).pack(
+            side="left", padx=(0, 8)
+        )
+        danger_button(actions, "Delete Selected", self.delete_selected, width=150).pack(
+            side="left"
+        )
 
         wrap = card(right, fg_color=theme.BG_CARD)
         wrap.grid(row=1, column=0, sticky="nsew")
@@ -122,6 +146,92 @@ class DemobTab(ctk.CTkFrame):
             wrap, COLUMNS, EQUIPMENT_WRAPPED_LABELS, EQUIPMENT_COLUMN_WIDTHS
         )
         self.table.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+
+    # ----------------------------------------------- the de-mobbed list --
+    def export_demobbed(self):
+        records = self.store.demob_records()
+        if not records:
+            messagebox.showwarning("No Data", "There is no de-mobbed equipment to export.")
+            return
+        default = f"Demobbed_Equipment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", initialfile=default,
+            filetypes=[("Excel Workbook", "*.xlsx")],
+        )
+        if not path:
+            return
+        export_equipment_to_excel(records, path)
+        notify(self, f"{len(records):,} de-mobbed record(s) exported to:\n{path}")
+
+    def import_demobbed(self):
+        path = filedialog.askopenfilename(
+            title="Import De-mobbed Equipment",
+            filetypes=[("Spreadsheet files", "*.xlsx *.xls *.csv *.tsv"),
+                       ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        def work(report):
+            report(message="Reading the file...")
+            from vendor_app.gui.equipment_tab import load_equipment_from_file
+            rows = load_equipment_from_file(path)
+            if not rows:
+                return {"added": 0, "updated": 0, "errors": [], "empty": True}
+            report(0, len(rows), f"Importing {len(rows):,} closed record(s)...")
+            return self.store.bulk_upsert_demobbed(
+                rows, progress=lambda done, total: report(done, total)
+            )
+
+        run_with_loading(
+            self, "Importing de-mobbed equipment", work, on_done=self._after_import,
+            subtitle="Every row must carry a De-mob Date - that is what makes it "
+                     "a closed record.",
+        )
+
+    def _after_import(self, result, error):
+        if error is not None:
+            messagebox.showerror("Import Failed", f"Could not import that file:\n{error}")
+            return
+        if result is None:
+            return
+        if result.get("empty"):
+            messagebox.showwarning("No Rows Found", "No recognizable rows were found.")
+            return
+        self.refresh()
+        if self.on_data_changed:
+            self.on_data_changed()
+        summary = f"Added: {result['added']:,}  •  Updated: {result['updated']:,}"
+        if result["errors"]:
+            lines = "\n".join(f"Row {i}: {err}" for i, err in result["errors"][:15])
+            more = len(result["errors"]) - 15
+            if more > 0:
+                lines += f"\n...and {more:,} more"
+            messagebox.showwarning(
+                "Imported with Errors",
+                f"{summary}\n\nRows skipped ({len(result['errors']):,}):\n{lines}",
+            )
+        else:
+            notify(self, summary)
+
+    def delete_selected(self):
+        ids = self.table.selected_ids()
+        records = [self._rows[i] for i in ids if i in self._rows]
+        if not records:
+            messagebox.showinfo("Select a Row", "Select one or more de-mobbed rows first.")
+            return
+        if not messagebox.askyesno(
+            "Delete De-mobbed Records",
+            f"Permanently delete {len(records)} closed record(s)?\n\n"
+            "This removes them from the equipment master entirely and cannot "
+            "be undone.",
+        ):
+            return
+        removed = self.store.delete_many(records)
+        self.refresh()
+        if self.on_data_changed:
+            self.on_data_changed()
+        notify(self, f"{removed} de-mobbed record(s) deleted.", kind="error")
 
     # ------------------------------------------------------------ actions --
     def clear_input(self):
@@ -208,6 +318,13 @@ class DemobTab(ctk.CTkFrame):
             return
         records = self.store.demob_records()
         self.table.clear()
+        # Row ids are kept so a selection can be turned back into the stored
+        # records that Delete Selected has to remove.
+        self._rows = {}
         for index, record in enumerate(records, start=1):
-            self.table.add_row(index - 1, [index] + [record.get(k, "") for k in EQUIPMENT_KEYS])
+            row_id = self.table.add_row(
+                index - 1, [index] + [record.get(k, "") for k in EQUIPMENT_KEYS],
+                iid=f"demob-{index}",
+            )
+            self._rows[row_id] = record
         self.count_pill.configure(text=f"  {len(records):,} machine(s)  ")

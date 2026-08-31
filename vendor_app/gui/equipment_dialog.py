@@ -12,18 +12,21 @@ entered as a fresh record instead.
 import customtkinter as ctk
 from tkinter import messagebox
 
-from vendor_app.config import DEMOB_FIELD, EQUIPMENT_KEYS, EQUIPMENT_LABELS
+from vendor_app.config import LEASE_TYPE_VALUES, DEMOB_FIELD, EQUIPMENT_KEYS, EQUIPMENT_LABELS
 from vendor_app.equipment import is_demobbed
 from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
 
+CHOICE_FIELDS = {"lease_type": LEASE_TYPE_VALUES}
+NOT_SET = "(not set)"
+
 SECTIONS = [
-    ("MACHINE", ["equipment_description", "uom", "capacity", "ro_rh"]),
+    ("MACHINE", ["equipment_description", "uom", "capacity", "ro_rh", "lease_type"]),
     ("IDENTIFIERS", ["rh_ro_number", "technical_id", "reg_no"]),
     ("VENDOR", ["vendor_code", "vendor_name"]),
-    ("DEPLOYMENT", ["rh_date", "demob_date", "plant", "plant_code"]),
+    ("DEPLOYMENT", ["rh_date", "demob_date", "plant", "plant_code", "shift"]),
     ("CONTRACT", ["validity_end_date", "arc_no", "fo_no"]),
     ("RATES", ["mcm_shift_code", "disc_mcm_shift", "mcm_shift_rate",
                "ot_code", "dic_ot", "ot_rate"]),
@@ -111,6 +114,22 @@ class EquipmentDialog(ctk.CTkToplevel):
             font=theme.body_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
+        if key in CHOICE_FIELDS and not self.locked:
+            # Lease Type is dry or wet and nothing else, so it is a list
+            # rather than a box a third value can be typed into.
+            current = (self.record.get(key, "") or "").upper()
+            var = ctk.StringVar(
+                value=current if current in CHOICE_FIELDS[key] else NOT_SET
+            )
+            ctk.CTkOptionMenu(
+                row, variable=var, values=[NOT_SET] + list(CHOICE_FIELDS[key]),
+                width=200, height=32,
+                fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+                button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            ).pack(side="left")
+            self.vars[key] = var
+            return
+
         var = ctk.StringVar(value=self.record.get(key, ""))
         entry = ctk.CTkEntry(
             row, textvariable=var, height=32,
@@ -133,6 +152,9 @@ class EquipmentDialog(ctk.CTkToplevel):
         if self.locked:
             return
         raw = {key: var.get() for key, var in self.vars.items()}
+        for key in CHOICE_FIELDS:
+            if raw.get(key) == NOT_SET:
+                raw[key] = ""
 
         # Setting a De-mob Date here closes the record, so route it through
         # demob() - the one path that logs the closure and releases the

@@ -12,6 +12,7 @@ import threading
 import pandas as pd
 
 from vendor_app.config import (
+    LEASE_TYPE_VALUES,
     DATA_DIR,
     DEMOB_FIELD,
     EQUIPMENT_FILE,
@@ -20,7 +21,7 @@ from vendor_app.config import (
     EQUIPMENT_LOOKUP_KEYS,
     EQUIPMENT_NUMERIC_FIELDS,
 )
-from vendor_app.validators import ValidationError, normalize
+from vendor_app.validators import ValidationError, normalize, validate_choice
 
 
 def is_demobbed(record: dict) -> bool:
@@ -45,6 +46,11 @@ def validate_equipment(raw: dict) -> dict:
     for key in EQUIPMENT_NUMERIC_FIELDS:
         if cleaned[key] and not cleaned[key].isdigit():
             raise ValidationError(EQUIPMENT_LABELS[key], "must be a number")
+
+    # Dry or wet hire, and nothing else - the same rule Vendor Type follows.
+    cleaned["lease_type"] = validate_choice(
+        cleaned["lease_type"], EQUIPMENT_LABELS["lease_type"], LEASE_TYPE_VALUES
+    )
 
     if not any(cleaned[k] for k in EQUIPMENT_LOOKUP_KEYS):
         labels = " / ".join(EQUIPMENT_LABELS[k] for k in EQUIPMENT_LOOKUP_KEYS)
@@ -141,13 +147,7 @@ class EquipmentStore:
 
     # ------------------------------------------------------------ Writes --
     def _find_existing(self, cleaned: dict):
-        for key in EQUIPMENT_LOOKUP_KEYS:
-            value = cleaned.get(key, "")
-            if value:
-                found = self._index.get((key, value.lower()))
-                if found is not None:
-                    return found
-        return None
+        return self._index_lookup(cleaned)
 
     def upsert(self, raw: dict) -> str:
         """Insert or merge one equipment row, matched on any shared
@@ -183,6 +183,87 @@ class EquipmentStore:
         if created_vendor:
             self._log_vendor_autocreate(*created_vendor)
         return result
+
+    def upsert_demobbed(self, raw: dict) -> str:
+        """Insert or merge a CLOSED record - the import side of the de-mob list.
+
+        Matched against closed records only. Re-importing a list this app
+        exported therefore updates those same rows instead of creating a
+        second copy of every machine, and it can never reopen or overwrite a
+        machine that is currently on site: closing one of those is the
+        De-mob action's job, which writes its own change-log entry.
+        """
+        cleaned = validate_equipment(raw)
+        if not is_demobbed(cleaned):
+            raise ValidationError(
+                EQUIPMENT_LABELS[DEMOB_FIELD],
+                "is required on a de-mob import - a row without it is not a "
+                "closed record",
+            )
+        identifier = equipment_id(cleaned)
+        with self._lock:
+            if self._index_lookup(cleaned) is not None:
+                raise ValidationError(
+                    identifier,
+                    "is still running - de-mob it from the De-mob screen rather "
+                    "than importing it as closed",
+                )
+            existing = self._find_demobbed(identifier)
+            if existing is not None:
+                changes = [
+                    f"{EQUIPMENT_LABELS[key]}: '{existing.get(key, '')}' -> '{cleaned[key]}'"
+                    for key in EQUIPMENT_KEYS
+                    if cleaned[key] and cleaned[key] != existing.get(key, "")
+                ]
+                for key in EQUIPMENT_KEYS:
+                    if cleaned[key]:
+                        existing[key] = cleaned[key]
+                result, target = "updated", existing
+                details = "; ".join(changes)
+            else:
+                self._records.append(cleaned)
+                result, target = "added", cleaned
+                details = "De-mobbed record imported"
+            self._reindex()
+            self.save()
+
+        if self.change_log is not None and details:
+            self.change_log.record(
+                equipment_id(target), target.get("equipment_description", ""),
+                "Imported (de-mob)", details,
+            )
+        return result
+
+    def _index_lookup(self, cleaned):
+        """The RUNNING record sharing an identifier with `cleaned`, if any."""
+        for key in EQUIPMENT_LOOKUP_KEYS:
+            value = cleaned.get(key, "")
+            if value:
+                found = self._index.get((key, value.lower()))
+                if found is not None:
+                    return found
+        return None
+
+    def bulk_upsert_demobbed(self, rows: list, progress=None) -> dict:
+        added = updated = 0
+        errors = []
+        total = len(rows)
+        for index, raw in enumerate(rows, start=1):
+            if not is_blank_equipment(raw):
+                try:
+                    if self.upsert_demobbed(raw) == "added":
+                        added += 1
+                    else:
+                        updated += 1
+                except ValidationError as exc:
+                    errors.append((index, str(exc)))
+            if progress is not None and (index % 50 == 0 or index == total):
+                progress(index, total)
+        return {"added": added, "updated": updated, "errors": errors}
+
+    def delete_many(self, records: list) -> int:
+        """Permanently remove several records. Returns how many went."""
+        return sum(1 for record in records if self.delete(record))
 
     def _log_vendor_autocreate(self, code, name):
         """Note the auto-created vendor in the EQUIPMENT log too, so the trail

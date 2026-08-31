@@ -23,9 +23,13 @@ def _now() -> str:
 class VendorStore:
     """Thread-safe CRUD + search over the vendor master dataset."""
 
-    def __init__(self, path: str = DATA_FILE, audit_log=None):
+    def __init__(self, path: str = DATA_FILE, audit_log=None, equipment_store=None):
         self.path = path
         self.audit_log = audit_log
+        # Set once the equipment master exists, so a vendor cannot be closed
+        # while machines are still running under its name. Optional, because
+        # the vendor store is also used on its own (imports, tests).
+        self.equipment_store = equipment_store
         self._lock = threading.Lock()
         self._records = {}   # vendor_code -> cleaned record dict (KEYS + status/created_at/updated_at)
         self._order = []     # vendor_code insertion order (stable display order)
@@ -193,11 +197,39 @@ class VendorStore:
             )
         return True
 
+    def running_equipment_for(self, code: str) -> int:
+        """How many machines are still on site under this vendor."""
+        if self.equipment_store is None:
+            return 0
+        needle = normalize(code)
+        if not needle:
+            return 0
+        return sum(
+            1 for record in self.equipment_store.running_records()
+            if normalize(record.get("vendor_code", "")) == needle
+        )
+
     def set_status(self, code: str, status: str) -> bool:
-        """Change only a vendor's lifecycle status (Active/Inactive/Blocked)."""
+        """Change only a vendor's lifecycle status (Active/Inactive/Blocked).
+
+        A vendor with equipment still running on site stays Active. Closing
+        one would leave machines on the ground belonging to a vendor the
+        system says is finished - and every count of active suppliers, every
+        breakdown email and every ARC raised against them would be reasoning
+        from a vendor that is not supposed to exist. De-mob the machines
+        first; the vendor can be closed the moment the last one is off site.
+        """
         code = normalize(code)
         if status not in STATUS_VALUES:
             raise ValueError(f"Unknown status: {status}")
+        if status != STATUS_DEFAULT:
+            running = self.running_equipment_for(code)
+            if running:
+                raise ValidationError(
+                    LABELS["vendor_code"] + f" {code}",
+                    f"cannot be set {status}: {running} machine(s) are still "
+                    "running under this vendor. De-mob them first.",
+                )
         with self._lock:
             record = self._records.get(code)
             if not record:

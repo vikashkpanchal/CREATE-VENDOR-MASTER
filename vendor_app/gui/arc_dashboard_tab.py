@@ -6,7 +6,6 @@ Laid out in the order the questions get asked:
     ARC Expiry Analysis          status, release position, trend, what expires in 30 days
     FO Expiry Analysis           the same, for the frame orders
     ARC Without FO               a contract with not one frame order against it
-    FO Without a Contract        the other side of that join, kept beside it
     Pending Approval             release indicator S - nothing can be ordered yet
     ARC vs FO Value Difference   target 10 Cr - released 6 Cr leaves 4 Cr to order
     Vendor Analysis              contracts vs frame orders, per vendor
@@ -135,7 +134,6 @@ class ArcDashboardTab(ctk.CTkFrame):
         self._build_arc_expiry(body)
         self._build_fo_expiry(body)
         self._build_report_section(body, "arc_without_fo")
-        self._build_report_section(body, "fo_without_arc")
         self._build_report_section(body, "pending_release")
         self._build_report_section(body, "value_difference")
         self._build_vendor_section(body)
@@ -147,7 +145,7 @@ class ArcDashboardTab(ctk.CTkFrame):
     # Nine cards never fit one row on a laptop, so they reflow the same way
     # the equipment filters do: fixed-width cells, column count computed from
     # the panel's real width. Nothing is ever pushed off the edge.
-    KPI_WIDTH = 218
+    KPI_WIDTH = 236
 
     def _build_kpis(self, parent):
         holder = ctk.CTkFrame(parent, fg_color="transparent")
@@ -165,7 +163,8 @@ class ArcDashboardTab(ctk.CTkFrame):
             )
             title.pack(anchor="w", padx=16, pady=(14, 2))
             figure = ctk.CTkLabel(
-                box, text=value, font=theme.display_font(), text_color=TONE_COLORS[tone],
+                box, text=value, font=self._figure_font(value),
+                text_color=TONE_COLORS[tone],
             )
             figure.pack(anchor="w", padx=16, pady=(0, 4))
             hint = ctk.CTkLabel(
@@ -185,6 +184,18 @@ class ArcDashboardTab(ctk.CTkFrame):
 
         holder.bind("<Configure>", lambda e: self._layout_kpis(e.width))
         self.after(60, lambda: self._layout_kpis(holder.winfo_width()))
+
+    @staticmethod
+    def _figure_font(text):
+        """A font that fits the figure in a KPI card, however long it is."""
+        length = len(str(text))
+        if length <= 8:
+            return theme.font(22, "bold")
+        if length <= 11:
+            return theme.font(19, "bold")
+        if length <= 14:
+            return theme.font(16, "bold")
+        return theme.font(14, "bold")
 
     def _layout_kpis(self, available_width):
         usable = max(0, available_width or 0)
@@ -336,7 +347,10 @@ class ArcDashboardTab(ctk.CTkFrame):
         analysis = self.analysis
 
         for key, _label, value, _tone in analysis.kpis():
-            self._kpi_cards[key].configure(text=value)
+            # A total value can be twelve digits and a count can be one. The
+            # figure is stepped down so a crore-scale amount is READ, not
+            # clipped at the card edge.
+            self._kpi_cards[key].configure(text=value, font=self._figure_font(value))
 
         self.subtitle.configure(
             text=f"{analysis.total_arc_count():,} ARC(s) worth "

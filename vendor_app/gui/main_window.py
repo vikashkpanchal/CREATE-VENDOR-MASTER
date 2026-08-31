@@ -68,6 +68,10 @@ class MainWindow(ctk.CTk):
         self.equipment_store = EquipmentStore(
             EQUIPMENT_FILE, change_log=self.equipment_log, vendor_store=self.store
         )
+        # The reverse link, so a vendor cannot be closed while machines are
+        # still running under it. Set after construction because the two
+        # stores refer to each other.
+        self.store.equipment_store = self.equipment_store
         self.arc_log = ChangeLog(ARC_AUDIT_FILE, ARC_AUDIT_COLUMNS)
         # ARCs and FOs name vendors too, so the ARC store seeds the vendor
         # master exactly the way the equipment store does.

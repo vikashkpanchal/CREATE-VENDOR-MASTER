@@ -25,6 +25,7 @@ SECTIONS = [
     # about the vendor rather than parts of its identity, and both come after
     # the mandated fields in the grid and the export too.
     ("VENDOR", ["vendor_code", "vendor_name", "vendor_email", "vendor_type"]),
+    ("LOCATION", ["city", "state"]),
     ("CONTACT PERSON 1", ["vendor_owner_name", "vendor_owner_contact", "vendor_owner_email"]),
     ("CONTACT PERSON 2", ["vendor_supervisor_name", "vendor_supervisor_contact", "vendor_supervisor_email"]),
 ]

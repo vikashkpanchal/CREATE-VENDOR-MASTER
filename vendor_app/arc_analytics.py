@@ -341,8 +341,9 @@ class ArcAnalysis:
         return (
             f"  Note: {unmatched} frame order(s) name a contract that is not in "
             "Table 1 at all. If a contract listed here should have orders "
-            "against it, check it against the FO Without a Contract list below - "
-            "the two files may be writing the same number differently."
+            "against it, the two files may be writing the same number "
+            "differently - the FO Without a Contract sheet in the export lists "
+            "them."
         )
 
     # ------------------------------------------ 16: ARC vs FO value gap --
@@ -465,10 +466,6 @@ class ArcAnalysis:
              f"{len(self.fos_expiring()):,}", "warn"),
             ("pending_release", "Pending Approval (S)",
              f"{len(self.pending_release()):,}", "warn"),
-            # Sits beside ARC Without FO on purpose: together they say
-            # whether the two files actually join up.
-            ("fo_without_arc", "FO Without a Contract",
-             f"{len(self.fos_without_arc()):,}", "warn"),
         ]
 
     # ----------------------------------------------------------- reports --
@@ -495,13 +492,6 @@ class ArcAnalysis:
                    self.arcs_without_fo(),
                    "A contract is in place but not one frame order names it."
                    + self.join_note()),
-            Report("fo_without_arc", "FO Without a Contract",
-                   ["frame", "contract_no", "vendor_name", "description", "plant",
-                    "start", "end", "released", "item_count"],
-                   self.fos_without_arc(),
-                   "A frame order naming a Contract No. that is not in Table 1. "
-                   "Either the contract has not been imported, or the two files "
-                   "write its number differently."),
             Report("arc_expiring", f"ARC Expiring in {window} Days",
                    ["document", "vendor_name", "end", "days_left", "target_value",
                     "released", "difference", "plant"],
@@ -579,8 +569,6 @@ class ArcAnalysis:
                           "are the figures the total adds up.")
         if key == "arc_without_fo":
             return self.report("arc_without_fo")
-        if key == "fo_without_arc":
-            return self.report("fo_without_arc")
         if key == "arc_expiring":
             return self.report("arc_expiring")
         if key == "fo_expiring":
@@ -596,11 +584,23 @@ class ArcAnalysis:
         raise KeyError(key)
 
     def full_reports(self):
-        """The reports plus both masters rolled to their entity, for export."""
+        """The reports plus both masters, and the unmatched frame orders.
+
+        That last one is not a dashboard section - it is a data-quality
+        answer rather than a management figure - but it stays in the
+        workbook, because when the two files do not join up it is the list
+        that says which rows to look at.
+        """
         return [
             Report("arc_master", "ARC Contracts", self.ARC_COLUMNS, self.arcs),
             Report("fo_master", "Frame Orders", self.FO_COLUMNS, self.fos),
-        ] + self.reports()
+        ] + self.reports() + [
+            Report("fo_without_arc", "FO Without a Contract",
+                   ["frame", "contract_no", "vendor_name", "description", "plant",
+                    "start", "end", "released", "item_count"],
+                   self.fos_without_arc(),
+                   "A frame order naming a Contract No. that is not in Table 1."),
+        ]
 
     def summary_rows(self):
         """The 19 analyses as a flat name/value sheet for the export."""

@@ -88,6 +88,25 @@ def validate_single_email_field(value, field_label: str) -> str:
     return text
 
 
+def validate_choice(value, field_label: str, allowed) -> str:
+    """One of `allowed`, in that spelling, or nothing at all.
+
+    Case and surrounding space are forgiven, because a pasted column will
+    not be consistent about them. A value outside the list is not: silently
+    accepting it would create a category nobody agreed to, and every count
+    by that field would then be wrong.
+    """
+    text = normalize(value)
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in allowed:
+        return upper
+    raise ValidationError(
+        field_label, "must be " + " or ".join(allowed) + f" - got '{text}'"
+    )
+
+
 def validate_vendor_type(value, field_label: str) -> str:
     """CAD or MARKET, in that spelling, or nothing at all.
 
@@ -96,16 +115,7 @@ def validate_vendor_type(value, field_label: str) -> str:
     is not forgiven: silently accepting it would create a category nobody
     agreed to, and every count by vendor type would then be wrong.
     """
-    text = normalize(value)
-    if not text:
-        return ""
-    upper = text.upper()
-    if upper in VENDOR_TYPE_VALUES:
-        return upper
-    raise ValidationError(
-        field_label,
-        "must be " + " or ".join(VENDOR_TYPE_VALUES) + f" - got '{text}'",
-    )
+    return validate_choice(value, field_label, VENDOR_TYPE_VALUES)
 
 
 def validate_record(raw: dict) -> dict:
@@ -140,6 +150,8 @@ def validate_record(raw: dict) -> dict:
     cleaned["vendor_type"] = validate_vendor_type(
         raw.get("vendor_type", ""), LABELS["vendor_type"]
     )
+    cleaned["city"] = normalize(raw.get("city", ""))
+    cleaned["state"] = normalize(raw.get("state", ""))
     return cleaned
 
 

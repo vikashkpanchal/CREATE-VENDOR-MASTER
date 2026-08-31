@@ -34,6 +34,8 @@ def build_export_dataframe(records: list) -> pd.DataFrame:
         LABELS["vendor_supervisor_contact"],
         LABELS["vendor_supervisor_email"],
         LABELS["vendor_type"],
+        LABELS["city"],
+        LABELS["state"],
         "Status",
     ]
 
@@ -198,72 +200,204 @@ def export_arc_analysis_to_excel(analysis, path: str) -> str:
 
 
 def export_arc_value_to_excel(lines: list, path: str, title: str = "") -> str:
-    """The priced ARC value annexure.
+    """The priced annexure, as two sheets of live formulas.
 
-    Quantities, rates and values are written as NUMBERS, not text, so the
-    sheet can be summed and filtered in Excel the way the original annexure
-    is; the two dates stay text in DD.MM.YYYY, which is the one shape they
-    are ever shown in. Each contract's subtotal row and the grand total are
-    banded and bold, as they are in the source workbook.
+    **Annexure 2** is the calculation, one or two rows per equipment
+    category. **Annexure 1** summarises it, one row per contract, and reads
+    its Impact straight out of Annexure 2's subtotal cell.
+
+    Every multiplication and every total is written as an Excel FORMULA, not
+    as a number this app worked out: the sheet can be audited cell by cell,
+    a rate can be corrected in place and everything above and below it
+    follows. The totals use SUBTOTAL(9,...), which ignores the nested
+    subtotals inside its own range and re-totals whatever a filter leaves
+    visible - which is how the source workbook does it.
+
+    Calibri 10 throughout, headers and totals bold, total rows on a very
+    light blue.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from vendor_app.arc_value import LINE_ARC_TOTAL, LINE_GRAND_TOTAL
-    from vendor_app.config import ARC_VALUE_COLUMNS, ARC_VALUE_LABELS
+    from openpyxl.utils import get_column_letter
+    from vendor_app.arc_value import LINE_ARC_TOTAL, LINE_GRAND_TOTAL, LINE_OT
+    from vendor_app.config import (
+        ARC_SUMMARY_COLUMNS, ARC_SUMMARY_LABELS, ARC_VALUE_COLUMNS, ARC_VALUE_LABELS,
+        OT_HOURS_PER_DAY, WORKING_DAYS_PER_MONTH,
+    )
 
-    NUMERIC = {"eqp_qty", "qty", "monthly_rate", "value"}
+    BODY_FONT = Font(name="Calibri", size=10)
+    BOLD_FONT = Font(name="Calibri", size=10, bold=True)
+    HEAD_FONT = Font(name="Calibri", size=10, bold=True, color=HEADER_FONT_COLOR)
+    TOTAL_FILL = PatternFill("solid", fgColor="DDEBF7")   # very light blue
+    HEAD_FILL = PatternFill("solid", fgColor=HEADER_FILL)
+    thin = Side(style="thin", color="BFBFBF")
+    BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
+    MONEY = "#,##0"
+    RATE = "#,##0.00"
+
+    detail_numeric = {"eqp_qty", "qty", "monthly_rate", "value"}
+    summary_numeric = {"existing_value", "revised_value", "impact"}
+
+    def write_header(sheet, columns, labels, row):
+        for index, key in enumerate(columns, start=1):
+            cell = sheet.cell(row=row, column=index, value=labels[key])
+            cell.fill = HEAD_FILL
+            cell.font = HEAD_FONT
+            cell.alignment = Alignment(wrap_text=True, vertical="center",
+                                       horizontal="center")
+            cell.border = BORDER
+        sheet.row_dimensions[row].height = 32
+
+    def fit(sheet, columns, labels, header_row, last_row):
+        for index, key in enumerate(columns, start=1):
+            letter = get_column_letter(index)
+            longest = max(
+                [len(labels[key])]
+                + [len(str(sheet.cell(row=r, column=index).value or ""))
+                   for r in range(header_row + 1, last_row + 1)]
+            )
+            sheet.column_dimensions[letter].width = min(max(longest + 3, 11), 42)
+        sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
 
     book = Workbook()
-    sheet = book.active
-    sheet.title = "ARC Value Calculation"
 
+    # ------------------------------------------------------- Annexure 2 --
+    detail = book.active
+    detail.title = "Annexure 2"
     row_index = 1
     if title:
-        sheet.cell(row=1, column=1, value=title).font = Font(bold=True, size=12)
+        cell = detail.cell(row=1, column=1, value=title)
+        cell.font = Font(name="Calibri", size=12, bold=True)
         row_index = 3
+    head2 = row_index
+    write_header(detail, ARC_VALUE_COLUMNS, ARC_VALUE_LABELS, head2)
 
-    header_row = row_index
-    headers = [ARC_VALUE_LABELS[key] for key in ARC_VALUE_COLUMNS]
-    for column, name in enumerate(headers, start=1):
-        cell = sheet.cell(row=header_row, column=column, value=name)
-        cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
-        cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
-        cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+    column_of = {key: i + 1 for i, key in enumerate(ARC_VALUE_COLUMNS)}
+    L = {key: get_column_letter(index) for key, index in column_of.items()}
+    first_data = head2 + 1
+    last_data = head2 + len(lines)
 
-    total_fill = PatternFill("solid", fgColor="DCE6F1")
-    thin = Side(style="thin", color="BFBFBF")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    block_start = first_data          # first row of the contract being written
+    mcm_row = None                    # the MCM row an OT row multiplies out of
+    summaries = []                    # (excel row of the subtotal, summary dict)
 
-    for offset, line in enumerate(lines, start=1):
-        is_total = line["kind"] in (LINE_ARC_TOTAL, LINE_GRAND_TOTAL)
-        for column, key in enumerate(ARC_VALUE_COLUMNS, start=1):
+    for offset, line in enumerate(lines):
+        row = first_data + offset
+        kind = line["kind"]
+        is_total = kind in (LINE_ARC_TOTAL, LINE_GRAND_TOTAL)
+
+        for key in ARC_VALUE_COLUMNS:
             value = line.get(key, "")
-            if key in NUMERIC and value not in ("", None):
+            if key in detail_numeric and value not in ("", None):
                 value = float(value)
-            cell = sheet.cell(row=header_row + offset, column=column, value=value)
-            cell.border = border
-            if key in NUMERIC:
-                cell.number_format = "#,##0" if key != "monthly_rate" else "#,##0.00"
-                cell.alignment = Alignment(horizontal="right")
+            cell = detail.cell(row=row, column=column_of[key], value=value)
+            cell.border = BORDER
+            cell.font = BOLD_FONT if is_total else BODY_FONT
             if is_total:
-                cell.fill = total_fill
-                cell.font = Font(bold=True)
+                cell.fill = TOTAL_FILL
+            if key in detail_numeric:
+                cell.number_format = RATE if key == "monthly_rate" else MONEY
+                cell.alignment = Alignment(horizontal="right")
 
-    for column, name in enumerate(headers, start=1):
-        letter = sheet.cell(row=header_row, column=column).column_letter
-        longest = max(
-            [len(name)]
-            + [len(str(sheet.cell(row=r, column=column).value or ""))
-               for r in range(header_row + 1, header_row + len(lines) + 1)]
+        if kind == LINE_ARC_TOTAL:
+            detail[f"{L['eqp_qty']}{row}"] = (
+                f"=SUBTOTAL(9,{L['eqp_qty']}{block_start}:{L['eqp_qty']}{row - 1})"
+            )
+            detail[f"{L['value']}{row}"] = (
+                f"=SUBTOTAL(9,{L['value']}{block_start}:{L['value']}{row - 1})"
+            )
+            if line.get("summary"):
+                summaries.append((row, line["summary"]))
+            block_start = row + 1
+            mcm_row = None
+        elif kind == LINE_GRAND_TOTAL:
+            # SUBTOTAL ignores the nested SUBTOTALs in its own range, so this
+            # sums the priced rows once rather than double-counting them.
+            detail[f"{L['eqp_qty']}{row}"] = (
+                f"=SUBTOTAL(9,{L['eqp_qty']}{first_data}:{L['eqp_qty']}{row - 1})"
+            )
+            detail[f"{L['value']}{row}"] = (
+                f"=SUBTOTAL(9,{L['value']}{first_data}:{L['value']}{row - 1})"
+            )
+        elif kind == LINE_OT:
+            hours = OT_HOURS_PER_DAY.get(str(line.get("working_shift", "")), 0)
+            if mcm_row is not None:
+                detail[f"{L['qty']}{row}"] = (
+                    f"={L['eqp_qty']}{mcm_row}*{L['qty']}{mcm_row}"
+                    f"*{WORKING_DAYS_PER_MONTH}*{hours}"
+                )
+            # An OT line's quantity already carries the equipment count, so
+            # its value is quantity x rate and nothing else.
+            detail[f"{L['value']}{row}"] = (
+                f"={L['qty']}{row}*{L['monthly_rate']}{row}"
+            )
+        else:
+            mcm_row = row
+            detail[f"{L['value']}{row}"] = (
+                f"={L['eqp_qty']}{row}*{L['qty']}{row}*{L['monthly_rate']}{row}"
+            )
+            detail.cell(row=row, column=column_of["value"]).number_format = MONEY
+
+    for key in ("eqp_qty", "qty", "monthly_rate", "value"):
+        for row in range(first_data, last_data + 1):
+            cell = detail.cell(row=row, column=column_of[key])
+            cell.number_format = RATE if key == "monthly_rate" else MONEY
+            cell.alignment = Alignment(horizontal="right")
+
+    fit(detail, ARC_VALUE_COLUMNS, ARC_VALUE_LABELS, head2, last_data)
+    if lines:
+        detail.auto_filter.ref = (
+            f"A{head2}:{get_column_letter(len(ARC_VALUE_COLUMNS))}{last_data}"
         )
-        sheet.column_dimensions[letter].width = min(max(longest + 3, 11), 42)
 
-    sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
-    sheet.row_dimensions[header_row].height = 34
-    sheet.auto_filter.ref = (
-        f"A{header_row}:"
-        f"{sheet.cell(row=header_row, column=len(headers)).column_letter}"
-        f"{header_row + len(lines)}"
-    )
+    # ------------------------------------------------------- Annexure 1 --
+    summary = book.create_sheet("Annexure 1", 0)
+    cell = summary.cell(row=1, column=1,
+                        value=title or "Contract Amendment Value Calculation")
+    cell.font = Font(name="Calibri", size=12, bold=True)
+    summary.cell(row=2, column=1, value="Summary of Annexure 2 - one row per ARC"
+                 ).font = Font(name="Calibri", size=10, italic=True)
+    head1 = 4
+    write_header(summary, ARC_SUMMARY_COLUMNS, ARC_SUMMARY_LABELS, head1)
+
+    scol = {key: i + 1 for i, key in enumerate(ARC_SUMMARY_COLUMNS)}
+    S = {key: get_column_letter(index) for key, index in scol.items()}
+    for offset, (detail_row, entry) in enumerate(summaries, start=1):
+        row = head1 + offset
+        for key in ARC_SUMMARY_COLUMNS:
+            value = entry.get(key, "")
+            if key in summary_numeric and value not in ("", None):
+                value = float(value)
+            cell = summary.cell(row=row, column=scol[key], value=value)
+            cell.border = BORDER
+            cell.font = BODY_FONT
+            if key in summary_numeric:
+                cell.number_format = MONEY
+                cell.alignment = Alignment(horizontal="right")
+        # Impact is READ from Annexure 2's own subtotal, and the revised
+        # value is derived from it here, so the two sheets cannot drift.
+        summary[f"{S['impact']}{row}"] = f"='Annexure 2'!{L['value']}{detail_row}"
+        summary[f"{S['revised_value']}{row}"] = (
+            f"={S['existing_value']}{row}+{S['impact']}{row}"
+        )
+
+    if summaries:
+        total_row = head1 + len(summaries) + 1
+        summary.cell(row=total_row, column=scol["vendor_name"], value="Total")
+        for key in summary_numeric:
+            letter = S[key]
+            summary[f"{letter}{total_row}"] = (
+                f"=SUBTOTAL(9,{letter}{head1 + 1}:{letter}{total_row - 1})"
+            )
+        for key in ARC_SUMMARY_COLUMNS:
+            cell = summary.cell(row=total_row, column=scol[key])
+            cell.font = BOLD_FONT
+            cell.fill = TOTAL_FILL
+            cell.border = BORDER
+            if key in summary_numeric:
+                cell.number_format = MONEY
+                cell.alignment = Alignment(horizontal="right")
+        fit(summary, ARC_SUMMARY_COLUMNS, ARC_SUMMARY_LABELS, head1, total_row)
+
     book.save(path)
     return path
