@@ -23,7 +23,9 @@ from vendor_app.config import (
 )
 from vendor_app.communication import parse_identifiers
 from vendor_app.export import export_equipment_to_excel
-from vendor_app.importer import _read_table, _normalize_header  # reuse tolerant file reading
+# The parser lives in the import layer; re-exported here because the
+# equipment screens have always imported it from this module.
+from vendor_app.importer import load_equipment_from_file
 from vendor_app.validators import normalize
 from vendor_app.gui import theme
 from vendor_app.gui.style import build_table, insert_row
@@ -31,26 +33,6 @@ from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, pill, primary_button, section_label, wrap_children
 
 COLUMNS = ["sr_no"] + EQUIPMENT_KEYS
-_EQUIPMENT_LABEL_TO_KEY = {label.lower(): key for key, label in EQUIPMENT_LABELS.items()}
-
-
-def load_equipment_from_file(path: str) -> list:
-    """Parse an .xlsx/.csv/.tsv of equipment rows, matching headers by name."""
-    df = _read_table(path)
-    field_columns = {}
-    for col in df.columns:
-        header = _normalize_header(col)
-        if header in _EQUIPMENT_LABEL_TO_KEY:
-            field_columns[_EQUIPMENT_LABEL_TO_KEY[header]] = col
-        elif header.replace(" ", "_") in EQUIPMENT_KEYS:
-            field_columns[header.replace(" ", "_")] = col
-
-    return [
-        {key: str(row.get(col, "")).strip() for key, col in field_columns.items()}
-        for _, row in df.iterrows()
-    ]
-
-
 class EquipmentSearchScreen(ctk.CTkFrame):
     """Look one machine up, or resolve a whole list of identifiers at once."""
 

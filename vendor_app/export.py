@@ -227,9 +227,12 @@ def export_arc_value_to_excel(lines: list, path: str, title: str = "") -> str:
 
     BODY_FONT = Font(name="Calibri", size=10)
     BOLD_FONT = Font(name="Calibri", size=10, bold=True)
-    HEAD_FONT = Font(name="Calibri", size=10, bold=True, color=HEADER_FONT_COLOR)
+    # Black on white, bordered and bold: this annexure is printed and signed,
+    # and a banded header wastes toner without adding anything the bold and
+    # the border do not already say.
+    HEAD_FONT = Font(name="Calibri", size=10, bold=True, color="000000")
     TOTAL_FILL = PatternFill("solid", fgColor="DDEBF7")   # very light blue
-    HEAD_FILL = PatternFill("solid", fgColor=HEADER_FILL)
+    HEAD_FILL = PatternFill("solid", fgColor="FFFFFF")
     thin = Side(style="thin", color="BFBFBF")
     BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
     MONEY = "#,##0"
@@ -401,3 +404,58 @@ def export_arc_value_to_excel(lines: list, path: str, title: str = "") -> str:
 
     book.save(path)
     return path
+
+
+# --------------------------------------------- all four masters, one file --
+# One sheet per master, each with the columns that master already exports, in
+# the same order. The names are what the importer looks for when the file
+# comes back, so they are constants rather than literals typed twice.
+MASTER_SHEETS = {
+    "vendors": "Vendor Master",
+    "equipment": "Equipment Master",
+    "arcs": "ARC Master",
+    "fos": "FO Master",
+}
+
+
+def _master_frames(vendors, equipment, arcs, fos):
+    """(sheet name, DataFrame) for each master, in its own column order."""
+    from vendor_app.config import (
+        ARC_DERIVED_LABELS, ARC_DISPLAY_COLUMNS, ARC_LABELS, EQUIPMENT_KEYS,
+        EQUIPMENT_LABELS, FO_DERIVED_LABELS, FO_DISPLAY_COLUMNS, FO_LABELS,
+    )
+
+    def simple(records, keys, labels):
+        columns = ["Sr. No."] + [labels[k] for k in keys]
+        rows = []
+        for index, record in enumerate(records, start=1):
+            row = {"Sr. No.": index}
+            for key in keys:
+                row[labels[key]] = record.get(key, "")
+            rows.append(row)
+        return pd.DataFrame(rows, columns=columns)
+
+    arc_labels = dict(ARC_LABELS); arc_labels.update(ARC_DERIVED_LABELS)
+    fo_labels = dict(FO_LABELS); fo_labels.update(FO_DERIVED_LABELS)
+    return [
+        (MASTER_SHEETS["vendors"], build_export_dataframe(vendors)),
+        (MASTER_SHEETS["equipment"],
+         simple(equipment, EQUIPMENT_KEYS, EQUIPMENT_LABELS)),
+        (MASTER_SHEETS["arcs"], simple(arcs, ARC_DISPLAY_COLUMNS, arc_labels)),
+        (MASTER_SHEETS["fos"], simple(fos, FO_DISPLAY_COLUMNS, fo_labels)),
+    ]
+
+
+def export_all_masters_to_excel(vendors, equipment, arcs, fos, path: str) -> dict:
+    """Every master in one workbook - one sheet each, arrangement unchanged.
+
+    Each sheet is exactly what that master's own export produces, so this is
+    a backup that can be read by eye, edited, and handed straight back to
+    the one-click import. Returns the row count per sheet.
+    """
+    frames = _master_frames(vendors, equipment, arcs, fos)
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        for sheet, frame in frames:
+            frame.to_excel(writer, index=False, sheet_name=sheet)
+            _style_worksheet(writer.sheets[sheet], list(frame.columns))
+    return {sheet: len(frame) for sheet, frame in frames}

@@ -486,8 +486,10 @@ plant, and says so).
 
 ### The workbook
 
-Two sheets, Calibri 10 throughout, headers and totals bold, total rows on a
-very light blue.
+Two sheets, Calibri 10 throughout. Headers are **black on white**, bold and
+bordered - this annexure gets printed and signed, and the bold and the border
+already say "header" without a band of colour. Total rows are bold on a very
+light blue.
 
 **Annexure 2** is the calculation, with those sixteen columns. Every
 multiplication and every total is written as a live Excel **formula**, not a
@@ -514,6 +516,33 @@ order:
 
 Because Impact is a reference rather than a copy, the two sheets cannot
 drift: correct a rate in Annexure 2 and Annexure 1 follows.
+
+## All data in one file
+
+Two buttons in the app header, on screen from the moment it opens:
+
+- **Export All Data** writes one workbook with four sheets - **Vendor
+  Master**, **Equipment Master**, **ARC Master**, **FO Master** - each with
+  exactly the columns that master already exports, in the same order. It is a
+  backup you can read by eye, edit, and hand straight back.
+- **Import All Data...** reads that file in again, routing each sheet to its
+  own store through the same bulk import a single master uses. Every rule
+  still applies: cell-level merge (a blank cell never overwrites what is
+  stored), validation per row, and a change-log entry for what actually
+  changed. Nothing is deleted.
+
+Sheets are matched by name and loaded vendors-first, so an equipment or ARC
+row that names a vendor finds it already there, and contracts land before the
+frame orders placed against them. A sheet the file does not carry is skipped
+and named in the summary rather than treated as an error - a file with only
+the vendor sheet still loads.
+
+Equipment goes in two passes, running rows then closed ones. A machine that
+left site and later came back legitimately has **both** a closed record and a
+running one under the same identifier; one pass would let the closed row merge
+into the running one and close the machine that is actually on site.
+(Identical closed duplicates still collapse into one - that is the same
+machine closed on the same date, not two events.)
 
 ## Communication
 
@@ -611,6 +640,7 @@ vendor_app/
   arc.py                      ArcStore: Table 1 + Table 2, with entity roll-up
   arc_analytics.py            the 19 ARC/FO analyses: expiry, gaps, risk, vendors
   arc_value.py                ARC value calculation: input rows -> priced annexure
+  workbook.py                 all four masters in one file, out and back in
   communication.py            group pasted rows into one email per vendor
   email_templates.py          email subjects/bodies + bordered HTML tables
   outlook.py                  Outlook draft creation (Windows/pywin32)

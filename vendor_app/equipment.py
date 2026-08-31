@@ -184,7 +184,7 @@ class EquipmentStore:
             self._log_vendor_autocreate(*created_vendor)
         return result
 
-    def upsert_demobbed(self, raw: dict) -> str:
+    def upsert_demobbed(self, raw: dict, allow_running_twin: bool = False) -> str:
         """Insert or merge a CLOSED record - the import side of the de-mob list.
 
         Matched against closed records only. Re-importing a list this app
@@ -192,6 +192,12 @@ class EquipmentStore:
         second copy of every machine, and it can never reopen or overwrite a
         machine that is currently on site: closing one of those is the
         De-mob action's job, which writes its own change-log entry.
+
+        `allow_running_twin` is for restoring a whole-master backup, where a
+        machine that left site and later came back legitimately has BOTH a
+        closed record and a running one under the same identifier. Refusing
+        there would drop half the history; merging them would close the
+        machine that is on site. So the closed row is kept as its own row.
         """
         cleaned = validate_equipment(raw)
         if not is_demobbed(cleaned):
@@ -202,7 +208,7 @@ class EquipmentStore:
             )
         identifier = equipment_id(cleaned)
         with self._lock:
-            if self._index_lookup(cleaned) is not None:
+            if not allow_running_twin and self._index_lookup(cleaned) is not None:
                 raise ValidationError(
                     identifier,
                     "is still running - de-mob it from the De-mob screen rather "
@@ -244,14 +250,15 @@ class EquipmentStore:
                     return found
         return None
 
-    def bulk_upsert_demobbed(self, rows: list, progress=None) -> dict:
+    def bulk_upsert_demobbed(self, rows: list, progress=None,
+                             allow_running_twin: bool = False) -> dict:
         added = updated = 0
         errors = []
         total = len(rows)
         for index, raw in enumerate(rows, start=1):
             if not is_blank_equipment(raw):
                 try:
-                    if self.upsert_demobbed(raw) == "added":
+                    if self.upsert_demobbed(raw, allow_running_twin) == "added":
                         added += 1
                     else:
                         updated += 1

@@ -14,8 +14,12 @@ each sub-tab inside it) is built lazily on first visit, so start-up stays
 fast no matter how much the app grows.
 """
 
+from datetime import datetime
+from tkinter import filedialog, messagebox
+
 import customtkinter as ctk
 
+from vendor_app import workbook
 from vendor_app.arc import ArcStore
 from vendor_app.audit import AuditLog, ChangeLog
 from vendor_app.config import (
@@ -26,6 +30,9 @@ from vendor_app.data_manager import VendorStore
 from vendor_app.equipment import EquipmentStore
 from vendor_app.settings import AppSettings
 from vendor_app.gui import theme
+from vendor_app.gui.loading import run_with_loading
+from vendor_app.gui.toast import notify
+from vendor_app.gui.widgets import primary_button, secondary_button
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -186,6 +193,19 @@ class MainWindow(ctk.CTk):
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w")
 
+        # One click out, one click in - for every master at once. They live in
+        # the header rather than on a tab because they are about the whole
+        # dataset, not any one master, and the header is on screen from the
+        # moment the app opens.
+        backup = ctk.CTkFrame(content, fg_color="transparent")
+        backup.pack(side="right", padx=(16, 0), pady=15)
+        secondary_button(
+            backup, "Import All Data...", self.import_all_data, width=160, height=32,
+        ).pack(side="left", padx=(0, 8))
+        primary_button(
+            backup, "Export All Data", self.export_all_data, width=150, height=32,
+        ).pack(side="left")
+
         badges = ctk.CTkFrame(content, fg_color="transparent")
         badges.pack(side="right", pady=17)
         self.equipment_badge = ctk.CTkLabel(
@@ -205,6 +225,83 @@ class MainWindow(ctk.CTk):
             corner_radius=999, height=30,
         )
         self.arc_badge.pack(side="right", padx=(8, 0))
+
+    # ------------------------------------------------- all-master backup --
+    def export_all_data(self):
+        """Every master into one workbook - a sheet each, arrangement as is."""
+        default = f"PM_Master_Data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", initialfile=default,
+            filetypes=[("Excel Workbook", "*.xlsx")],
+        )
+        if not path:
+            return
+
+        def work(report):
+            report(message="Writing every master...")
+            return workbook.export_all(
+                self.store, self.equipment_store, self.arc_store, path
+            )
+
+        def done(counts, error):
+            if error is not None:
+                messagebox.showerror("Export Failed", f"Could not write that file:\n{error}")
+                return
+            notify(self, "Exported to:\n" + path + "\n\n" + "\n".join(
+                f"{sheet}: {rows:,} row(s)" for sheet, rows in counts.items()
+            ))
+
+        run_with_loading(
+            self, "Exporting all data", work, on_done=done,
+            subtitle="Vendor, Equipment, ARC and FO masters into a single workbook.",
+        )
+
+    def import_all_data(self):
+        """Read a workbook of masters back in - one sheet per master."""
+        path = filedialog.askopenfilename(
+            title="Import All Data",
+            filetypes=[("Excel Workbook", "*.xlsx *.xls"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        if not messagebox.askyesno(
+            "Import All Data",
+            "Load every master sheet this file carries?\n\n"
+            "Rows are merged by their keys the same way a single-master import "
+            "is: a blank cell never overwrites what is already stored, and "
+            "nothing is deleted.",
+        ):
+            return
+
+        def work(report):
+            return workbook.import_all(
+                path, self.store, self.equipment_store, self.arc_store,
+                progress=lambda done, total, message="": report(done, total, message),
+            )
+
+        def done(results, error):
+            if error is not None:
+                messagebox.showerror("Import Failed", f"Could not read that file:\n{error}")
+                return
+            self.refresh_all()
+            summary = workbook.summarise(results)
+            problems = [
+                f"{workbook.LABELS[kind]} row {row}: {message}"
+                for kind in workbook.IMPORT_ORDER
+                for row, message in (results.get(kind) or {}).get("errors", [])[:10]
+            ]
+            if problems:
+                messagebox.showwarning(
+                    "Imported with Errors",
+                    summary + "\n\nRows skipped:\n" + "\n".join(problems[:20]),
+                )
+            else:
+                notify(self, summary)
+
+        run_with_loading(
+            self, "Importing all data", work, on_done=done,
+            subtitle="Vendor, Equipment, ARC and FO masters from a single workbook.",
+        )
 
     # ----------------------------------------------------------- refresh --
     def refresh_all(self):

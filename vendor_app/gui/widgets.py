@@ -9,13 +9,13 @@ import customtkinter as ctk
 from vendor_app.gui import theme
 
 
-def primary_button(master, text, command, width=170, **kwargs):
+def primary_button(master, text, command, height=34, width=170, **kwargs):
     return ctk.CTkButton(
         master,
         text=text,
         command=command,
         width=width,
-        height=34,
+        height=height,
         corner_radius=6,
         fg_color=theme.ACCENT,
         hover_color=theme.ACCENT_HOVER,
@@ -25,13 +25,13 @@ def primary_button(master, text, command, width=170, **kwargs):
     )
 
 
-def secondary_button(master, text, command, width=140, **kwargs):
+def secondary_button(master, text, command, height=34, width=140, **kwargs):
     return ctk.CTkButton(
         master,
         text=text,
         command=command,
         width=width,
-        height=34,
+        height=height,
         corner_radius=6,
         fg_color=theme.BG_CARD_ALT,
         hover_color=theme.BG_HOVER,
@@ -43,13 +43,13 @@ def secondary_button(master, text, command, width=140, **kwargs):
     )
 
 
-def danger_button(master, text, command, width=140, **kwargs):
+def danger_button(master, text, command, height=34, width=140, **kwargs):
     return ctk.CTkButton(
         master,
         text=text,
         command=command,
         width=width,
-        height=34,
+        height=height,
         corner_radius=6,
         fg_color=theme.DANGER,
         hover_color=theme.DANGER_HOVER,

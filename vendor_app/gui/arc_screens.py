@@ -23,119 +23,14 @@ from vendor_app.config import (
     describe_release_indicator, describe_release_status,
 )
 from vendor_app.export import export_arcs_to_excel, export_fos_to_excel
-from vendor_app.importer import _normalize_header, _read_table
+from vendor_app.importer import load_arc_rows_from_file
 from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.records_screen import RecordsScreen
 
-# The header shapes a real download carries, beyond our own labels. SAP
-# abbreviates column names differently between layouts, so an untouched
-# export still has to land on the right fields without being renamed first.
-HEADER_ALIASES = {
-    # Table 1 - ARC data (ME3L)
-    "purchasing doc.": "purchasing_document",
-    "purch.doc.": "purchasing_document",
-    "purchasing document no": "purchasing_document",
-    "agreement no": "purchasing_document",
-    "outline agreement": "purchasing_document",
-    "contract no": "purchasing_document",
-    "contract no.": "purchasing_document",
-    "doc. date": "document_date",
-    "doc.date": "document_date",
-    "document date": "document_date",
-    "vendor/supplying plant": "vendor_supplying_plant",
-    "vendor / supplying plant": "vendor_supplying_plant",
-    "supplying plant": "vendor_supplying_plant",
-    "short text": "short_text",
-    "material short text": "short_text",
-    "validity per. start": "validity_start",
-    "validity per.start": "validity_start",
-    "validity start": "validity_start",
-    "valid from": "validity_start",
-    "validity period end": "validity_end",
-    "validity end": "validity_end",
-    "valid to": "validity_end",
-    "target val. (header)": "target_value",
-    "target val.": "target_value",
-    "target value": "target_value",
-    "target val": "target_value",
-    "release indicator": "release_indicator",
-    "release ind.": "release_indicator",
-    "rel. indicator": "release_indicator",
-    "release status": "release_status",
-    "rel. status": "release_status",
-    "po history/release documentation": "po_history",
-    "po history": "po_history",
-    "release documentation": "po_history",
-    "purchasing group": "purchasing_group",
-    "purchasing grp": "purchasing_group",
-    "pur. group": "purchasing_group",
-    "item": "item",
-    "plant": "plant",
-    # Table 2 - framework & contract tracking
-    "serial no.": "serial_no",
-    "serial no": "serial_no",
-    "sr. no.": "serial_no",
-    "contr.pur.group": "contract_pur_group",
-    "contr. pur. group": "contract_pur_group",
-    "contract purchasing group": "contract_pur_group",
-    "header text": "header_text",
-    "vendor": "vendor",
-    "vendor code": "vendor",
-    "vendor name": "vendor_name",
-    "contract value": "contract_value",
-    "requisitioner": "requisitioner",
-    "frame numbers": "frame_numbers",
-    "frame number": "frame_numbers",
-    "frame order": "frame_numbers",
-    "fo no": "frame_numbers",
-    "fo.valdt.start": "fo_validity_start",
-    "fo valdt start": "fo_validity_start",
-    "fo validity start": "fo_validity_start",
-    "fo.valdt.end": "fo_validity_end",
-    "fo valdt end": "fo_validity_end",
-    "fo validity end": "fo_validity_end",
-    "frame pur.group": "frame_pur_group",
-    "frame pur group": "frame_pur_group",
-    "description": "description",
-    "req.tracking no.": "req_tracking_no",
-    "req tracking no": "req_tracking_no",
-    "tracking no": "req_tracking_no",
-    "released value": "released_value",
-    "actual value": "actual_value",
-    "opening value": "opening_value",
-}
-
-
 def _load_rows(path, keys, labels):
-    """Read a spreadsheet of rows for one table, matching headers by label.
-
-    Three header shapes are accepted, in order: the spec's own column names,
-    the abbreviations a raw download uses, and our internal column names -
-    so an export from this app, an untouched SAP file and the stored CSV all
-    import. A column that matches none of them is ignored rather than
-    rejected: a real export always carries extras we do not need.
-    """
-    frame = _read_table(path)
-    label_to_key = {_normalize_header(v): k for k, v in labels.items()}
-    columns = {}
-    for column in frame.columns:
-        header = _normalize_header(column)
-        key = label_to_key.get(header)
-        if key is None:
-            alias = HEADER_ALIASES.get(header)
-            # An alias only applies to the table being imported, so an FO's
-            # "Description" can never land on a contract field, or the
-            # reverse.
-            key = alias if alias in keys else None
-        if key is None and header.replace(" ", "_").replace(".", "") in keys:
-            key = header.replace(" ", "_").replace(".", "")
-        if key is not None and key not in columns:
-            columns[key] = column
-    return [
-        {key: str(row.get(column, "")).strip() for key, column in columns.items()}
-        for _, row in frame.iterrows()
-    ]
+    """One sheet of ARC or FO rows, read through the shared import layer."""
+    return load_arc_rows_from_file(path, keys, labels)
 
 
 class _ArcScreenBase(RecordsScreen):
