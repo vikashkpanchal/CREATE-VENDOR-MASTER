@@ -164,8 +164,40 @@ email when it needs one).
 Alongside the identification columns (Equipment Description, UOM, Capacity,
 RO/RH, Vendor Code, Vendor Name, RH/RO Number, Technical ID, Reg No, RH Date,
 **De-mob Date**, Plant) each machine carries its commercial terms: **Plant
-Code, Validity End Date, ARC No, FO No, MCM/Shift Code, Disc (MCM/Shift),
-MCM/Shift Rate, OT Code, DIC (OT), OT Rate**.
+Code, Validity End Date, ARC No, FO No, Service Code- MCM/Shift, Service Code
+Description, MCM Rate, Service Code-OT, OT Service Description, OT Rate**.
+
+The five service-code columns were previously headed MCM/Shift Code, Disc
+(MCM/Shift), MCM/Shift Rate, OT Code and DIC (OT). A sheet carrying either
+spelling imports onto the right fields, so files exported by an older build
+still load. Only the headings changed: the ARC value calculation reads these
+columns by field, not by label, so **its figures are unaffected** by the
+rename.
+
+### Dates
+
+**Every date column — RH Date, De-mob Date and Validity End Date — is
+DD.MM.YYYY**, matching the ARC and FO masters. Whatever shape a date arrives
+in (an Excel serial, `2024-03-05 00:00:00`, `5-Jan-2026`, `31/12/2025`) it is
+re-stamped on the way in: on import, on paste, on a single-cell edit in the
+grid, and on load, so a file written by an older build reads back in the new
+format. A cell that is not a date at all is left exactly as typed.
+
+### ARC No and Plant Code are derived
+
+A machine belongs to a frame order, and that FO already knows which contract
+it was placed against — so **ARC No is read from the FO No** rather than
+typed a second time and left to disagree with it. The contract in turn knows
+its plant, so **Plant Code is read from that ARC**.
+
+Both are only ever filled in or corrected from the masters. When the FO No is
+blank, or the frame order or contract is not on file, **whatever was typed
+stays** — which is what makes manual entry the fallback rather than something
+the app overwrites. The derivation runs on every add, import, paste and
+single-cell edit; **Re-link ARC / Plant** on the Records screen re-runs it
+across the whole fleet, for when a frame order is loaded or a contract's
+plant is corrected after the machines were entered. Every change it makes is
+written to the change log.
 
 ### Shift and Lease Type
 
@@ -209,11 +241,26 @@ An interactive analytics view over the fleet. It opens on **Running
 Equipment**; the Fleet filter switches to de-mobbed machines or to
 everything.
 
-Its KPI tiles include **Expired Equipment** — machines whose Validity End
-Date is already behind us — and **Expiring in 30 Days**, kept as two separate
-numbers rather than one: a machine whose validity has run out is a different
-problem from one that is about to, and rolling them together hides the first
-inside the second. A date that cannot be read is counted as neither.
+Its seven KPI tiles are **Running Equipment, Suppliers, Equipment Types,
+Plants, Expired Equipment, Expiring in 30 Days** and **Equipment Without
+FO**. Expired and expiring are kept as two separate numbers rather than one:
+a machine whose validity has run out is a different problem from one that is
+about to, and rolling them together hides the first inside the second. A date
+that cannot be read is counted as neither. **Equipment Without FO** counts
+the machines carrying no FO number — without one there is no frame order to
+bill against, and no contract to read the ARC No and Plant Code from.
+
+**Every tile opens.** Double-click (or click) any figure and the rows behind
+it appear in a read-only grid with the same row-height control the other
+tables have, and its own **Export (.xlsx)**. The pop-up is built from the
+very list the tile counted, on the filters in force, so it can never disagree
+with the card that opened it. A count-of-distinct tile — Suppliers,
+Equipment Types, Plants — opens as one row per value with the number of
+machines against it, which is what that figure actually counts.
+
+The tiles reflow to fit: fixed-width cells, the column count computed from
+the panel's real width, and never more than two rows deep, so nothing is ever
+pushed off the edge of a 14" laptop.
 
 The filter panel is **two rows of four**, always: capping the column count is
 what keeps all eight filters on screen rather than spread into one strip that
@@ -438,8 +485,10 @@ per machine:
 Everything else is looked up:
 
 ```
-Technical ID -> equipment master   ARC No, MCM/shift code + Disc (MCM/Shift) +
-                                   rate, OT code + DIC (OT) + rate, validity end
+Technical ID -> equipment master   ARC No, Service Code- MCM/Shift + Service
+                                   Code Description + MCM Rate, Service Code-OT
+                                   + OT Service Description + OT Rate,
+                                   validity end
 ARC No       -> ARC & FO master    vendor code, vendor name, plant
 Vendor Code  -> vendor master      vendor type
 ```
@@ -463,8 +512,8 @@ Each line prints as one row, or two when the machine carries overtime:
 
 | | Service Code | Equipment Description | UOM | Monthly Rate | Qty. | Value |
 | --- | --- | --- | --- | --- | --- | --- |
-| MCM row | MCM/Shift Code | Disc (MCM/Shift) | `MCM` | MCM/shift rate | months | Eqp Qty × months × rate |
-| OT row *(only when an OT code exists)* | OT Code | DIC (OT) | `H` | OT rate | Eqp Qty × months × 26 × hours/day | Qty × rate |
+| MCM row | Service Code- MCM/Shift | Service Code Description | `MCM` | MCM Rate | months | Eqp Qty × months × rate |
+| OT row *(only when an OT code exists)* | Service Code-OT | OT Service Description | `H` | OT Rate | Eqp Qty × months × 26 × hours/day | Qty × rate |
 
 Overtime hours per working day come from the shift: **2** on a 12-hour
 deployment, **11** on a 24-hour one, over **26** working days a month. The
@@ -604,8 +653,9 @@ Every grid in the app shares the same behaviour:
   than the display it opens on, every header keeps a reserved column for its
   action buttons, titles wrap rather than pushing them away, and the
   Equipment Master filter panel is capped at two rows of four so all eight
-  filters - Plant and Plant Code included - are always in view. Verified on a
-  1366x768 (14") display across every tab.
+  filters - Plant and Plant Code included - are always in view, with its seven
+  KPI tiles capped the same way. Verified on a 1366x768 (14") display across
+  every tab.
 
 Master Data Records, Multi Vendor Search results, and the Audit Log all
 use the same themed table component (`vendor_app/gui/style.py`): headers

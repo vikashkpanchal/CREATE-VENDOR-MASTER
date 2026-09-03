@@ -25,10 +25,11 @@ rate, a 24-hour deployment beside a 12-hour one, a different extension date
 
 Each such line prints as one row, or two when the machine carries overtime:
 
-    MCM row   Service Code = MCM/shift code, Description = Disc (MCM/Shift),
-              UOM = MCM, Rate = MCM/shift rate, Qty = months,
+    MCM row   Service Code = Service Code- MCM/Shift, Description = Service
+              Code Description, UOM = MCM, Rate = MCM Rate, Qty = months,
               Value = Eqp Qty x months x rate
-    OT row    Service Code = OT code, Description = DIC (OT), UOM = H,
+    OT row    Service Code = Service Code-OT, Description = OT Service
+              Description, UOM = H,
               Rate = OT rate, Qty = Eqp Qty x months x 26 x hours-per-day
               (2 on a 12-hour shift, 11 on a 24-hour one),
               Value = Qty x rate

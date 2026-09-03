@@ -24,9 +24,12 @@ from vendor_app.gui.widgets import card, pill, primary_button, secondary_button
 
 
 class KpiDetailDialog(ctk.CTkToplevel):
-    def __init__(self, master, report, figure="", caption=""):
+    def __init__(self, master, report, figure="", caption="", widths=None):
         super().__init__(master)
         self.report = report
+        # The ARC widths by default; another dashboard hands in its own, so
+        # one pop-up serves every set of columns.
+        self.widths = widths or getattr(report, "widths", None) or WIDTHS
         self.configure(fg_color=theme.BG_SURFACE)
         self.title(report.title)
 
@@ -117,7 +120,7 @@ class KpiDetailDialog(ctk.CTkToplevel):
         wrap.grid_columnconfigure(0, weight=1)
 
         self.table = EditableTable(
-            wrap, self.report.columns, self.report.headers(), WIDTHS,
+            wrap, self.report.columns, self.report.headers(), self.widths,
         )
         self.table.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         for index, row in enumerate(self.report.rows):

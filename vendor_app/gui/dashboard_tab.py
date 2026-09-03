@@ -18,6 +18,7 @@ from vendor_app.config import (
 )
 from vendor_app.arc import parse_date
 from vendor_app.equipment import is_demobbed
+from vendor_app.equipment_analytics import report_for, without_fo
 from vendor_app.export import export_equipment_to_excel
 from vendor_app.gui import theme
 from vendor_app.gui.charts import BarChart, SplitBar
@@ -204,31 +205,107 @@ class DashboardTab(ctk.CTkFrame):
         # row stays left-aligned under the row above it instead of spreading.
         self._filter_row.grid_columnconfigure(columns, weight=1, minsize=0)
 
+    # Seven tiles never fit one row on a laptop, so they reflow the way the
+    # filters do: fixed-width cells, column count from the panel's real width,
+    # and never more than two rows deep - four then three reads as a block,
+    # where five then two reads as a row with two strays under it.
+    KPI_WIDTH = 200
+    MAX_KPI_ROWS = 2
+    KPI_TILES = (
+        ("equipment", "Running Equipment"),
+        ("vendors", "Suppliers"),
+        ("categories", "Equipment Types"),
+        ("plants", "Plants"),
+        ("expired", "Expired Equipment"),
+        ("expiring", "Expiring in 30 Days"),
+        ("no_fo", "Equipment Without FO"),
+    )
+
     def _build_kpis(self, parent):
-        strip = ctk.CTkFrame(parent, fg_color="transparent")
-        strip.pack(fill="x", pady=(0, 12))
+        holder = ctk.CTkFrame(parent, fg_color="transparent")
+        holder.pack(fill="x", pady=(0, 12))
+        self._kpi_holder = holder
+        self._kpi_cells = []
+        self._kpi_columns = None
         self.kpi = {}
         self.kpi_titles = {}
-        for key, label in (
-            ("equipment", "Running Equipment"),
-            ("vendors", "Suppliers"),
-            ("categories", "Equipment Types"),
-            ("plants", "Plants"),
-            ("expired", "Expired Equipment"),
-            ("expiring", "Expiring in 30 Days"),
-        ):
-            box = card(strip, fg_color=theme.BG_CARD)
-            box.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        for key, label in self.KPI_TILES:
+            box = card(holder, fg_color=theme.BG_CARD)
             title_label = ctk.CTkLabel(
-                box, text=label, font=theme.small_font(), text_color=theme.TEXT_SECONDARY
+                box, text=label, font=theme.small_font(),
+                text_color=theme.TEXT_SECONDARY, anchor="w", justify="left",
+                wraplength=self.KPI_WIDTH - 34,
             )
             title_label.pack(anchor="w", padx=16, pady=(14, 0))
             value = ctk.CTkLabel(
                 box, text="0", font=theme.display_font(), text_color=theme.TEXT_PRIMARY
             )
-            value.pack(anchor="w", padx=16, pady=(0, 14))
+            value.pack(anchor="w", padx=16, pady=(0, 2))
+            hint = ctk.CTkLabel(
+                box, text="double-click to view", font=theme.font(9),
+                text_color=theme.TEXT_MUTED,
+            )
+            hint.pack(anchor="w", padx=16, pady=(0, 12))
+            # The whole tile answers, not just the digits: a card that reacts
+            # only where the number happens to be reads as broken elsewhere.
+            # Single click opens it too, so the figure is never a dead end for
+            # anyone who does not think to double-click.
+            for widget in (box, title_label, value, hint):
+                widget.bind("<Button-1>", lambda e, k=key: self.open_kpi(k))
+                widget.bind("<Double-Button-1>", lambda e, k=key: self.open_kpi(k))
+                widget.configure(cursor="hand2")
+            box.bind("<Enter>", lambda e, b=box: b.configure(border_color=theme.ACCENT))
+            box.bind("<Leave>", lambda e, b=box: b.configure(border_color=theme.BORDER_SOFT))
             self.kpi[key] = value
             self.kpi_titles[key] = title_label
+            self._kpi_cells.append(box)
+
+        holder.bind("<Configure>", lambda e: self._layout_kpis(e.width))
+        self.after(60, lambda: self._layout_kpis(holder.winfo_width()))
+
+    def _layout_kpis(self, available_width):
+        usable = max(0, available_width or 0)
+        cap = -(-len(self._kpi_cells) // self.MAX_KPI_ROWS)      # ceil
+        if usable < self.KPI_WIDTH:
+            columns = 1 if usable else cap
+        else:
+            columns = max(1, min(cap, usable // self.KPI_WIDTH))
+        if self._kpi_columns == columns:
+            return
+        self._kpi_columns = columns
+        for index, box in enumerate(self._kpi_cells):
+            box.grid(
+                row=index // columns, column=index % columns,
+                padx=(0, 10), pady=(0, 10), sticky="ew",
+            )
+        for column in range(columns):
+            self._kpi_holder.grid_columnconfigure(
+                column, weight=1, minsize=self.KPI_WIDTH, uniform="kpi"
+            )
+        # Columns left over from a wider layout must lose their weight, or the
+        # last row of tiles keeps stretching into space nothing occupies.
+        for column in range(columns, len(self._kpi_cells)):
+            self._kpi_holder.grid_columnconfigure(column, weight=0, minsize=0, uniform="")
+
+    # -------------------------------------------------------- drill-down --
+    def open_kpi(self, key):
+        """Open the machines behind one figure, ready to export.
+
+        A double-click delivers a single click first, so the pop-up already
+        on screen is raised rather than opened a second time behind itself.
+        """
+        from vendor_app.gui.kpi_dialog import KpiDetailDialog
+        existing = getattr(self, "_kpi_dialog", None)
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            return
+        label = self.kpi_titles[key].cget("text")
+        report = report_for(key, self.filtered, fleet_label=self._fleet_kpi_label())
+        self._kpi_dialog = KpiDetailDialog(
+            self, report, figure=self.kpi[key].cget("text"),
+            caption=f"Behind the \u201c{label}\u201d figure, on the current filters.",
+            widths=report.widths,
+        )
 
     def _build_charts(self, parent):
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -355,6 +432,9 @@ class DashboardTab(ctk.CTkFrame):
         expired, expiring = self._validity_counts(records)
         self.kpi["expired"].configure(text=f"{expired:,}")
         self.kpi["expiring"].configure(text=f"{expiring:,}")
+        # A machine with no FO cannot be billed against a frame order, and
+        # cannot take its ARC No or Plant Code from one either.
+        self.kpi["no_fo"].configure(text=f"{len(without_fo(records)):,}")
 
         self.vendor_chart.set_data(self._top(records, "vendor_name"))
         self.category_chart.set_data(self._top(records, "equipment_description"))

@@ -12,6 +12,7 @@ import threading
 import pandas as pd
 
 from vendor_app.config import (
+    EQUIPMENT_DATE_FIELDS,
     LEASE_TYPE_VALUES,
     DATA_DIR,
     DEMOB_FIELD,
@@ -21,6 +22,7 @@ from vendor_app.config import (
     EQUIPMENT_LOOKUP_KEYS,
     EQUIPMENT_NUMERIC_FIELDS,
 )
+from vendor_app.arc import format_date
 from vendor_app.validators import ValidationError, normalize, validate_choice
 
 
@@ -52,6 +54,11 @@ def validate_equipment(raw: dict) -> dict:
         cleaned["lease_type"], EQUIPMENT_LABELS["lease_type"], LEASE_TYPE_VALUES
     )
 
+    # Every date the same shape, whatever the export wrote: DD.MM.YYYY, no
+    # time. A cell that is not a date at all is left exactly as typed.
+    for key in EQUIPMENT_DATE_FIELDS:
+        cleaned[key] = format_date(cleaned[key])
+
     if not any(cleaned[k] for k in EQUIPMENT_LOOKUP_KEYS):
         labels = " / ".join(EQUIPMENT_LABELS[k] for k in EQUIPMENT_LOOKUP_KEYS)
         raise ValidationError(labels, "at least one identifier is required")
@@ -66,12 +73,18 @@ def is_blank_equipment(raw: dict) -> bool:
 class EquipmentStore:
     """CRUD + multi-key lookup over the equipment master dataset."""
 
-    def __init__(self, path: str = EQUIPMENT_FILE, change_log=None, vendor_store=None):
+    def __init__(self, path: str = EQUIPMENT_FILE, change_log=None, vendor_store=None,
+                 arc_store=None):
         self.path = path
         self.change_log = change_log
         # When set, any vendor referenced by an equipment row that is not yet
         # in the vendor master is created there automatically (code + name).
         self.vendor_store = vendor_store
+        # When set, a machine's ARC No is taken from the contract its FO No
+        # belongs to, and its Plant Code from that contract - see
+        # resolve_links(). Assigned after construction, because the ARC store
+        # is built alongside this one.
+        self.arc_store = arc_store
         self._lock = threading.Lock()
         self._records = []           # list of cleaned dicts, display order
         self._index = {}             # (lookup_key, value.lower()) -> record
@@ -107,6 +120,12 @@ class EquipmentStore:
             df = pd.read_csv(self.path, dtype=str, keep_default_na=False)
             for _, row in df.iterrows():
                 record = {k: normalize(row.get(k, "")) for k in EQUIPMENT_KEYS}
+                # A file written by an older build - or edited by hand - can
+                # hold dates in any shape. They are re-stamped on the way in
+                # so the grid, the exports and the dashboard all read
+                # DD.MM.YYYY, whatever was on disk.
+                for key in EQUIPMENT_DATE_FIELDS:
+                    record[key] = format_date(record[key])
                 if any(record.values()):
                     self._records.append(record)
         self._reindex()
@@ -149,11 +168,78 @@ class EquipmentStore:
     def _find_existing(self, cleaned: dict):
         return self._index_lookup(cleaned)
 
+    def resolve_links(self, record: dict) -> list:
+        """Fill ARC No from the FO, and Plant Code from that ARC.
+
+        A machine belongs to a frame order, and the frame order already knows
+        which contract it was placed against - so ARC No is READ from the FO
+        rather than typed a second time and left to disagree with it. The
+        contract in turn knows its plant, so Plant Code comes from there.
+
+        Both are only ever FILLED IN or CORRECTED from the masters. When the
+        FO No is blank, or the frame order or contract is not on file, the
+        stored value is left alone - which is what makes manual entry the
+        fallback rather than something the app overwrites.
+
+        Returns a list of "Field: 'old' -> 'new'" notes for the change log.
+        """
+        if self.arc_store is None:
+            return []
+        notes = []
+        frame = normalize(record.get("fo_no", ""))
+        if frame:
+            rows = self.arc_store.items_for_frame(frame)
+            contract = normalize(rows[0].get("contract_no", "")) if rows else ""
+            if contract and contract != normalize(record.get("arc_no", "")):
+                notes.append(
+                    f"{EQUIPMENT_LABELS['arc_no']}: '{record.get('arc_no', '')}' "
+                    f"-> '{contract}' (from FO {frame})"
+                )
+                record["arc_no"] = contract
+
+        arc_no = normalize(record.get("arc_no", ""))
+        if arc_no:
+            plant = normalize(self.arc_store.header_for(arc_no).get("plant", ""))
+            if plant and plant != normalize(record.get("plant_code", "")):
+                notes.append(
+                    f"{EQUIPMENT_LABELS['plant_code']}: "
+                    f"'{record.get('plant_code', '')}' -> '{plant}' (from ARC {arc_no})"
+                )
+                record["plant_code"] = plant
+        return notes
+
+    def relink_all(self) -> dict:
+        """Re-derive ARC No and Plant Code across every record.
+
+        The masters move after equipment is entered - a frame order gets
+        loaded, a contract's plant is corrected - so this is the button that
+        brings the machines back in step without re-importing them.
+        """
+        changed = 0
+        entries = []
+        with self._lock:
+            for record in self._records:
+                notes = self.resolve_links(record)
+                if notes:
+                    changed += 1
+                    entries.append((
+                        equipment_id(record), record.get("equipment_description", ""),
+                        "Re-linked", "; ".join(notes),
+                    ))
+            if changed:
+                self._reindex()
+                self.save()
+        if self.change_log is not None and entries:
+            for args in entries:
+                self.change_log.record(*args)
+        return {"changed": changed, "total": len(self._records)}
+
     def upsert(self, raw: dict) -> str:
         """Insert or merge one equipment row, matched on any shared
         identifier. Same cell-level merge rule as the vendor master: only
         non-blank incoming fields overwrite what is already stored."""
         cleaned = validate_equipment(raw)
+        self.resolve_links(cleaned)
         with self._lock:
             existing = self._find_existing(cleaned)
             if existing is not None:
@@ -171,6 +257,11 @@ class EquipmentStore:
                 self._records.append(cleaned)
                 result, target = "added", cleaned
                 details = "New equipment record created"
+            # Once more on the merged row: the FO may have been on file
+            # already even though this edit left the cell blank.
+            link_notes = self.resolve_links(target)
+            if link_notes:
+                details = "; ".join([details] + link_notes) if details else "; ".join(link_notes)
             self._reindex()
             self.save()
             created_vendor = self._sync_vendor(target)
@@ -230,6 +321,7 @@ class EquipmentStore:
                 self._records.append(cleaned)
                 result, target = "added", cleaned
                 details = "De-mobbed record imported"
+            self.resolve_links(target)
             self._reindex()
             self.save()
 
@@ -331,6 +423,16 @@ class EquipmentStore:
                                 equipment_id(target),
                                 target.get("equipment_description", ""),
                                 "Added", "New equipment record created",
+                            ))
+                        # Derive ARC No / Plant Code from the masters on the
+                        # merged row, so an import inherits the links whether
+                        # the FO came in with this batch or was already on file.
+                        link_notes = self.resolve_links(target)
+                        if link_notes:
+                            log_entries.append((
+                                equipment_id(target),
+                                target.get("equipment_description", ""),
+                                "Linked", "; ".join(link_notes),
                             ))
                         # Index incrementally: re-indexing the whole dataset
                         # per row would make a large import quadratic.
@@ -445,6 +547,10 @@ class EquipmentStore:
                 "If it has returned to site, add it again as a new record.",
             )
         new_value = normalize(value)
+        # A date typed into the grid is re-stamped the same way an imported
+        # one is, so the column never mixes formats.
+        if key in EQUIPMENT_DATE_FIELDS:
+            new_value = format_date(new_value)
         old_value = record.get(key, "")
         if new_value == old_value:
             return False
@@ -453,14 +559,18 @@ class EquipmentStore:
 
         with self._lock:
             record[key] = new_value
+            # Typing an FO on a machine is how it is joined to its contract,
+            # so the ARC No and Plant Code follow the moment it is entered.
+            link_notes = self.resolve_links(record) if key in ("fo_no", "arc_no") else []
             self._reindex()
             self.save()
             created_vendor = self._sync_vendor(record) if key in ("vendor_code", "vendor_name") else None
 
         if self.change_log is not None:
+            details = [f"{EQUIPMENT_LABELS[key]}: '{old_value}' -> '{new_value}'"] + link_notes
             self.change_log.record(
                 equipment_id(record), record.get("equipment_description", ""),
-                "Updated", f"{EQUIPMENT_LABELS[key]}: '{old_value}' -> '{new_value}'",
+                "Updated", "; ".join(details),
             )
         if created_vendor:
             self._log_vendor_autocreate(*created_vendor)

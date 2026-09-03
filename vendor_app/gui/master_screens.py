@@ -13,6 +13,7 @@ from vendor_app.equipment import is_demobbed
 from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.records_screen import RecordsScreen
+from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import secondary_button
 
 VENDOR_COLUMNS = ["sr_no"] + DISPLAY_COLUMNS
@@ -156,6 +157,9 @@ class EquipmentRecordsScreen(RecordsScreen):
         secondary_button(parent, "+ Add Equipment", self.add_equipment, width=150).pack(
             side="left", padx=(0, 8)
         )
+        secondary_button(parent, "Re-link ARC / Plant", self.relink, width=170).pack(
+            side="left", padx=(0, 8)
+        )
         holder = ctk.CTkFrame(parent, fg_color="transparent")
         holder.pack(side="left", padx=(0, 8))
         self.fleet_var = ctk.StringVar(value=FLEET_RUNNING)
@@ -166,6 +170,26 @@ class EquipmentRecordsScreen(RecordsScreen):
             button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
             font=theme.font(12, "bold"),
         ).pack()
+
+    def relink(self):
+        """Re-read every machine's ARC No from its FO, and Plant Code from
+        that ARC.
+
+        The masters move after equipment is entered - a frame order is
+        loaded, a contract's plant is corrected - and this brings the fleet
+        back in step without re-importing it. Only blanks and disagreements
+        are touched; a machine whose FO is not on file keeps whatever was
+        typed, which is what makes manual entry the fallback.
+        """
+        result = self.store.relink_all()
+        if result["changed"]:
+            self.refresh()
+            if self.on_data_changed:
+                self.on_data_changed()
+            notify(self, f"{result['changed']:,} of {result['total']:,} machine(s) "
+                         "re-linked to their ARC and plant.")
+        else:
+            notify(self, "Every machine already agrees with its FO and ARC.")
 
     def fetch(self, query):
         choice = self.fleet_var.get() if hasattr(self, "fleet_var") else FLEET_RUNNING

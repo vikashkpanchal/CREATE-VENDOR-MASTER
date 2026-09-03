@@ -85,6 +85,10 @@ class MainWindow(ctk.CTk):
         self.arc_store = ArcStore(
             change_log=self.arc_log, vendor_store=self.store
         )
+        # A machine's ARC No is read from the contract its FO belongs to, and
+        # its Plant Code from that contract's header. Set after construction
+        # because the ARC store is built after the equipment store.
+        self.equipment_store.arc_store = self.arc_store
         self.settings = AppSettings()
 
         self._build_header()

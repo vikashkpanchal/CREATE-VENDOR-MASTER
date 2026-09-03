@@ -250,11 +250,11 @@ EQUIPMENT_LABELS = {
     "validity_end_date": "Validity End Date",
     "arc_no": "ARC No",
     "fo_no": "FO No",
-    "mcm_shift_code": "MCM/Shift Code",
-    "disc_mcm_shift": "Disc (MCM/Shift)",
-    "mcm_shift_rate": "MCM/Shift Rate",
-    "ot_code": "OT Code",
-    "dic_ot": "DIC (OT)",
+    "mcm_shift_code": "Service Code- MCM/Shift",
+    "disc_mcm_shift": "Service Code Description",
+    "mcm_shift_rate": "MCM Rate",
+    "ot_code": "Service Code-OT",
+    "dic_ot": "OT Service Description",
     "ot_rate": "OT Rate",
     "shift": "Shift",
     "lease_type": "Lease Type",
@@ -278,11 +278,11 @@ EQUIPMENT_WRAPPED_LABELS = {
     "validity_end_date": "Validity\nEnd Date",
     "arc_no": "ARC\nNo",
     "fo_no": "FO\nNo",
-    "mcm_shift_code": "MCM/Shift\nCode",
-    "disc_mcm_shift": "Disc\n(MCM/Shift)",
-    "mcm_shift_rate": "MCM/Shift\nRate",
-    "ot_code": "OT\nCode",
-    "dic_ot": "DIC\n(OT)",
+    "mcm_shift_code": "Service Code-\nMCM/Shift",
+    "disc_mcm_shift": "Service Code\nDescription",
+    "mcm_shift_rate": "MCM\nRate",
+    "ot_code": "Service\nCode-OT",
+    "dic_ot": "OT Service\nDescription",
     "ot_rate": "OT\nRate",
     "shift": "Shift",
     "lease_type": "Lease\nType",
@@ -316,11 +316,21 @@ EQUIPMENT_COLUMN_WIDTHS = {
     "lease_type": 120,
 }
 
-# Equipment lookup keys: pasting any ONE of these retrieves the full record.
+# The header names these columns carried before the rename. Kept so a sheet
+# exported by an earlier build still imports onto the right fields.
+EQUIPMENT_LEGACY_LABELS = {
+    "mcm_shift_code": "MCM/Shift Code",
+    "disc_mcm_shift": "Disc (MCM/Shift)",
+    "mcm_shift_rate": "MCM/Shift Rate",
+    "ot_code": "OT Code",
+    "dic_ot": "DIC (OT)",
+}
+
 # A machine is hired one of two ways, so Lease Type is a choice rather than
 # free text - the same rule Vendor Type follows.
 LEASE_TYPE_VALUES = ["DRY", "WET"]
 
+# Equipment lookup keys: pasting any ONE of these retrieves the full record.
 EQUIPMENT_LOOKUP_KEYS = ["rh_ro_number", "technical_id", "reg_no"]
 
 # Technical ID is numeric; RH/RO Number is alphanumeric; Reg No is free text.
@@ -329,8 +339,9 @@ EQUIPMENT_NUMERIC_FIELDS = {"technical_id"}
 # Columns treated as amounts on the dashboard / rate roll-ups.
 EQUIPMENT_RATE_FIELDS = {"mcm_shift_rate", "ot_rate", "disc_mcm_shift", "dic_ot"}
 
-# Columns the equipment change log and dashboard treat as dates.
-EQUIPMENT_DATE_FIELDS = {"rh_date", "validity_end_date", "demob_date"}
+# Every date column on a machine. Normalised to DD.MM.YYYY on the way in and
+# rendered that way on the way out, exactly as the ARC and FO dates are.
+EQUIPMENT_DATE_FIELDS = ("rh_date", "validity_end_date", "demob_date")
 
 # A machine with a De-mob Date has left site. Such a record is FROZEN: its
 # cells can no longer be edited, it is excluded from "running" counts, and

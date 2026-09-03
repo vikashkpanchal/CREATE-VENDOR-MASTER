@@ -105,10 +105,14 @@ def equipment_rows_from_frame(df) -> list:
     """Equipment rows out of an already-read table, headers matched by label."""
     global _EQUIPMENT_LABEL_TO_KEY
     if _EQUIPMENT_LABEL_TO_KEY is None:
-        from vendor_app.config import EQUIPMENT_LABELS
+        from vendor_app.config import EQUIPMENT_LABELS, EQUIPMENT_LEGACY_LABELS
         _EQUIPMENT_LABEL_TO_KEY = {
             _normalize_header(label): key for key, label in EQUIPMENT_LABELS.items()
         }
+        # Sheets this app exported before the service-code columns were
+        # renamed still carry the old headings, so they keep loading.
+        for key, label in EQUIPMENT_LEGACY_LABELS.items():
+            _EQUIPMENT_LABEL_TO_KEY.setdefault(_normalize_header(label), key)
     from vendor_app.config import EQUIPMENT_KEYS
 
     columns = {}
