@@ -324,12 +324,18 @@ class EquipmentStore:
             self.resolve_links(target)
             self._reindex()
             self.save()
+            # A closed record names its supplier too, and that supplier has
+            # to exist on the vendor master for the history to be readable -
+            # the same rule the running rows follow.
+            created_vendor = self._sync_vendor(target)
 
         if self.change_log is not None and details:
             self.change_log.record(
                 equipment_id(target), target.get("equipment_description", ""),
                 "Imported (de-mob)", details,
             )
+        if created_vendor:
+            self._log_vendor_autocreate(*created_vendor)
         return result
 
     def _index_lookup(self, cleaned):

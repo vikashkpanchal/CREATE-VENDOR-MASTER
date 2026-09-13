@@ -2,7 +2,7 @@
 
 The whole application is five things, and the navigation says so:
 
-    Vendor Master     Records | Search | Change Log
+    Vendor Master     Records | Search | Dashboard | Supply Capability | Change Log
     Equipment Master  Records | Search | De-mob | Dashboard | Change Log
     ARC & FO Master   Dashboard | Structure | ARC Records | FO Records | Change Log
     ARC Value Calc.   three input columns priced into a contract annexure
@@ -32,6 +32,7 @@ from vendor_app.settings import AppSettings
 from vendor_app.gui import theme
 from vendor_app.gui.loading import run_with_loading
 from vendor_app.gui.toast import notify
+from vendor_app.gui.util import fit_on_screen
 from vendor_app.gui.widgets import primary_button, secondary_button
 
 ctk.set_appearance_mode("dark")
@@ -56,14 +57,12 @@ class MainWindow(ctk.CTk):
         # column - would sit off the edge with no way to reach it. The
         # minimum size is clamped for the same reason: a minsize the screen
         # cannot satisfy is a window that can never be made to fit.
-        screen_w, screen_h = self.winfo_screenwidth(), self.winfo_screenheight()
-        width = min(1480, max(900, screen_w - 80))
-        height = min(900, max(620, screen_h - 90))
-        self.geometry(
-            f"{width}x{height}+{max(0, (screen_w - width) // 2)}"
-            f"+{max(0, (screen_h - height) // 3)}"
-        )
-        self.minsize(min(1150, width), min(700, height))
+        #
+        # fit_on_screen also divides by CustomTkinter's window scaling, which
+        # is what makes this hold on a Windows laptop running at 125% or
+        # 150%: without that the clamped size is multiplied straight back up
+        # and the right-hand side of every screen is pushed off the display.
+        fit_on_screen(self, 1480, 900, min_w=1150, min_h=700)
 
         # --- stores -------------------------------------------------------
         self.audit_log = AuditLog(AUDIT_FILE)
@@ -133,6 +132,7 @@ class MainWindow(ctk.CTk):
             from vendor_app.gui.master_tabs import VendorMasterTab
             self.vendor_tab = VendorMasterTab(
                 self._panes[name], self.store, self.audit_log,
+                equipment_store=self.equipment_store,
                 on_data_changed=self.refresh_all,
             )
             self.vendor_tab.pack(fill="both", expand=True)

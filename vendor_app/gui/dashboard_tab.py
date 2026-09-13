@@ -13,11 +13,10 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from vendor_app.config import (
-    EQUIPMENT_COLUMN_WIDTHS, EQUIPMENT_KEYS, EQUIPMENT_LABELS, EQUIPMENT_WRAPPED_LABELS,
-    FLEET_ALL, FLEET_DEMOB, FLEET_RUNNING, FLEET_FILTER_VALUES,
+    EQUIPMENT_COLUMN_WIDTHS, EQUIPMENT_KEYS, EQUIPMENT_WRAPPED_LABELS,
+    FLEET_DEMOB, FLEET_RUNNING, FLEET_FILTER_VALUES,
 )
 from vendor_app.arc import parse_date
-from vendor_app.equipment import is_demobbed
 from vendor_app.equipment_analytics import report_for, without_fo
 from vendor_app.export import export_equipment_to_excel
 from vendor_app.gui import theme

@@ -14,6 +14,7 @@ from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
+from vendor_app.gui.util import fit_on_screen
 
 # Vendor Type is a choice, not free text, so it is rendered as a dropdown
 # rather than an entry - there is no way to type a third value into it.
@@ -45,14 +46,7 @@ class EditVendorDialog(ctk.CTkToplevel):
         # Fit the dialog to the screen rather than assuming 740px of height is
         # available - on a laptop / scaled display a fixed-height dialog can
         # extend past the bottom of the screen, taking the Save button with it.
-        screen_h = self.winfo_screenheight()
-        screen_w = self.winfo_screenwidth()
-        height = min(740, max(420, screen_h - 120))
-        width = min(560, max(420, screen_w - 80))
-        x = max(0, (screen_w - width) // 2)
-        y = max(0, (screen_h - height) // 3)
-        self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(420, 380)
+        fit_on_screen(self, 560, 740, min_w=420, min_h=380, margin_h=120)
         self.transient(master)
         self.grab_set()
 

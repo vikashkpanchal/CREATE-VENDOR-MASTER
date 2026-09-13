@@ -14,6 +14,7 @@ import traceback
 import customtkinter as ctk
 
 from vendor_app.gui import theme
+from vendor_app.gui.util import fit_on_screen
 
 
 class LoadingDialog(ctk.CTkToplevel):
@@ -36,11 +37,7 @@ class LoadingDialog(ctk.CTkToplevel):
 
         self.configure(fg_color=theme.BG_SURFACE)
         self.title(title)
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        width, height = 470, 186
-        self.geometry(
-            f"{width}x{height}+{max(0,(screen_w-width)//2)}+{max(0,(screen_h-height)//3)}"
-        )
+        fit_on_screen(self, 470, 186)
         self.resizable(False, False)
         self.transient(master)
         # No close button / Escape: the work must finish or fail on its own.

@@ -112,7 +112,7 @@ you can scan in a glance:
 
 | Tab | Sub-tabs |
 |-----|----------|
-| **Vendor Master** | Records · Search · Change Log |
+| **Vendor Master** | Records · Search · Dashboard · Supply Capability · Change Log |
 | **Equipment Master** | Records · Search · De-mob Equipment · Dashboard · Change Log |
 | **ARC & FO Master** | Dashboard · Structure · ARC Records · FO Records · Change Log |
 | **ARC Value Calculation** | Input · Calculated annexure · Export |
@@ -149,15 +149,84 @@ Both masters share the same screen design, and both behave the same way.
   who made it. Each is filterable and exports to `.xlsx` on its own.
 - **Dialogs always fit.** Every dialog sizes itself to the actual screen and
   reserves its buttons before its body, so Save can never end up off-screen.
+- **Windows display scaling is respected, not multiplied.** CustomTkinter
+  multiplies every size it is given by the Windows scaling factor, so a
+  window asked for 1286x678 on a 1366x768 laptop set to 150% was created
+  1929 pixels wide - a third of the app, and everything on the right-hand
+  side of it, off the edge of the screen. Every window and dialog now divides
+  by that factor first, so the app fits the display at 100%, 125% and 150%
+  alike. Verified on a 1366x768 screen at all three.
 
 ### Vendors created automatically from equipment
 
 Any vendor referenced by an equipment row that is not already in the vendor
-master is created there automatically with its code and name - on single
-edits and on bulk imports alike. The vendor master's log records the new
-vendor; the equipment log records why it appeared. Contact details are left
-blank for you to fill in (the Communication tab will prompt for a missing
-email when it needs one).
+master is created there automatically with its code and name - on a single
+edit, on a bulk import, on a pasted block and on a **de-mob import** alike.
+A closed record names its supplier too, and that supplier has to exist for
+the history to be readable. The vendor master's log records the new vendor;
+the equipment log records why it appeared. Contact details are left blank
+for you to fill in (the Communication tab will prompt for a missing email
+when it needs one).
+
+### Vendor status follows the fleet
+
+A vendor is **Active while at least one machine of theirs is running**, and
+**Inactive once none is**. A de-mobbed machine does not keep its supplier
+open - there is nothing of theirs on site.
+
+**Sync Vendor Status**, on the Vendor Dashboard, applies that rule. It is a
+button rather than something automatic, so a status never changes under
+somebody who is looking at it: the dashboard says how many vendors are out
+of step, the button shows exactly what it is about to do, and every flip is
+written to the vendor change log with its reason. **Blocked is never
+touched** - that is a decision somebody made about the vendor, not a reading
+of the fleet, and re-deriving it would quietly re-open a supplier who was
+stopped on purpose.
+
+The guard in the other direction still stands: a vendor with machines on
+site cannot be set Inactive by hand either.
+
+## Vendor Master
+
+### Dashboard
+
+Eight figures over the supplier list: **Total, Active, Inactive, CAD,
+MARKET, No Email ID, Vendors Without Equipment** and **Status Out Of Step**.
+Every tile opens - click or double-click and the vendors behind that figure
+appear in a read-only grid with its own **Export (.xlsx)**, built from the
+same list the tile counted. Alongside them: a status donut, the CAD/MARKET
+and email-on-file splits, and the top ten vendors by machines running and by
+kinds of equipment supplied.
+
+**No Email ID** counts a vendor as reachable if an address is on *any* of
+the three email columns - whether it sits under the vendor, the first
+contact person or the second makes no difference to whether an email can be
+sent.
+
+### Supply Capability
+
+Which vendor can supply which kind of equipment, read out of the equipment
+master's own history. Two views of the same fact, because two different
+questions get asked of it:
+
+| View | Answers |
+| --- | --- |
+| **By Vendor** | what each supplier can send, how many kinds, how many are running now, and whether they are a **Specialist** (one kind of machine) or **Multi-equipment** |
+| **By Equipment** | who can send a particular machine - the question that gets asked when one is needed on site and the usual supplier cannot cover it |
+
+**De-mobbed machines count.** A vendor whose three tippers have left site can
+still supply tippers, and that is what this view is for; what is on site
+today is carried alongside in its own column rather than replacing it.
+
+Filter by equipment type, by supplier profile, or search across both. Either
+view exports as it stands.
+
+### Search
+
+**Single Vendor Search** opens one vendor's full profile; **Multi Vendor
+Search** checks a whole list of codes at once - paste them one per line or
+comma-separated, and every match comes back in a sortable grid that exports.
+The two are switched with the **SEARCH** buttons directly under the title.
 
 ## Equipment Master
 

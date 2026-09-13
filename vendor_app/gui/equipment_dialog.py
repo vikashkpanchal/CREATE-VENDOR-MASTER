@@ -18,6 +18,7 @@ from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
+from vendor_app.gui.util import fit_on_screen
 
 CHOICE_FIELDS = {"lease_type": LEASE_TYPE_VALUES}
 NOT_SET = "(not set)"
@@ -48,13 +49,7 @@ class EquipmentDialog(ctk.CTkToplevel):
         self.title("Add Equipment" if self.is_new else "Equipment Record")
 
         # Sized against the real screen so Save is never off the bottom edge.
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        height = min(820, max(440, screen_h - 120))
-        width = min(660, max(460, screen_w - 80))
-        self.geometry(
-            f"{width}x{height}+{max(0, (screen_w - width) // 2)}+{max(0, (screen_h - height) // 3)}"
-        )
-        self.minsize(460, 400)
+        fit_on_screen(self, 660, 820, min_w=460, min_h=400, margin_h=120)
         self.transient(master)
         self.grab_set()
 

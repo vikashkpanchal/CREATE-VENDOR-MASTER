@@ -21,6 +21,7 @@ from vendor_app.gui.editable_table import EditableTable
 from vendor_app.gui.style import ROW_HEIGHT_CHOICES, ROW_HEIGHT_DEFAULT
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, pill, primary_button, secondary_button
+from vendor_app.gui.util import fit_on_screen
 
 
 class KpiDetailDialog(ctk.CTkToplevel):
@@ -33,14 +34,8 @@ class KpiDetailDialog(ctk.CTkToplevel):
         self.configure(fg_color=theme.BG_SURFACE)
         self.title(report.title)
 
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        width = min(1280, max(720, screen_w - 120))
-        height = min(760, max(420, screen_h - 140))
-        self.geometry(
-            f"{width}x{height}+{max(0, (screen_w - width) // 2)}"
-            f"+{max(0, (screen_h - height) // 4)}"
-        )
-        self.minsize(680, 380)
+        fit_on_screen(self, 1280, 760, min_w=680, min_h=380,
+                      margin_w=120, margin_h=140, y_divisor=4)
         self.transient(master)
         self.grab_set()
 

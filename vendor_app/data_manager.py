@@ -245,6 +245,61 @@ class VendorStore:
             self.audit_log.record(code, vendor_name, "Status Change", f"Status: '{old}' -> '{status}'")
         return True
 
+    def sync_statuses(self, dry_run: bool = False) -> dict:
+        """Bring every vendor's status in line with the equipment master.
+
+        A vendor is Active while at least one machine of theirs is running,
+        and Inactive once none is. De-mobbed machines do not keep a supplier
+        open - there is nothing of theirs on site.
+
+        Blocked is never touched: it is a decision somebody made about the
+        vendor rather than a reading of the fleet, and re-deriving it would
+        quietly re-open a supplier who was stopped on purpose.
+
+        This is deliberately a thing the user presses rather than something
+        that happens behind them, so the master never changes status under
+        somebody who is looking at it. `dry_run` reports what would change
+        without writing anything.
+
+        Returns {"to_inactive", "to_active", "changed", "blocked"}.
+        """
+        from vendor_app.vendor_analytics import status_review
+
+        review = status_review(self, self.equipment_store)
+        result = {
+            "to_inactive": len(review["to_inactive"]),
+            "to_active": len(review["to_active"]),
+            "blocked": len(review["blocked"]),
+            "changed": 0,
+        }
+        if dry_run:
+            result["changed"] = result["to_inactive"] + result["to_active"]
+            return result
+
+        entries = []
+        now = _now()
+        with self._lock:
+            for status, records in (("Inactive", review["to_inactive"]),
+                                    (STATUS_DEFAULT, review["to_active"])):
+                for record in records:
+                    old = record.get("status", STATUS_DEFAULT)
+                    record["status"] = status
+                    record["updated_at"] = now
+                    result["changed"] += 1
+                    reason = ("no machine of theirs is running in the equipment master"
+                              if status == "Inactive"
+                              else "a machine of theirs is running in the equipment master")
+                    entries.append((
+                        record["vendor_code"], record.get("vendor_name", ""),
+                        "Status Change", f"Status: '{old}' -> '{status}' ({reason})",
+                    ))
+            if result["changed"]:
+                self.save()
+
+        if self.audit_log is not None and entries:
+            self.audit_log.record_many(entries)
+        return result
+
     def delete(self, code: str) -> bool:
         """Permanently remove a vendor record. Irreversible - prefer set_status
         to Inactive/Blocked for reversible lifecycle changes."""

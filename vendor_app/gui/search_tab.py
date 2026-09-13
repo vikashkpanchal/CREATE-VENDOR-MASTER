@@ -14,6 +14,9 @@ from vendor_app.gui.style import build_table, insert_row, set_heading_text
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, pill, primary_button, secondary_button, section_label, wrap_children
 
+SINGLE_MODE = "Single Vendor Search"
+MULTI_MODE = "Multi Vendor Search"
+
 
 class SearchTab(ctk.CTkFrame):
     def __init__(self, master, store, on_data_changed=None):
@@ -33,27 +36,37 @@ class SearchTab(ctk.CTkFrame):
 
     # --------------------------------------------------------- mode switch --
     def _build_mode_switch(self):
-        bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.pack(fill="x", padx=20, pady=(20, 12))
+        """Title, then the two searches as their own row of buttons.
 
-        left = ctk.CTkFrame(bar, fg_color="transparent")
-        bar.grid_columnconfigure(0, weight=1)
-        bar.grid_columnconfigure(1, weight=0)
-        left.grid(row=0, column=0, sticky="ew")
-        wrap_children(left)
+        The switch used to sit in the far top-right corner of the header. On
+        a Windows laptop at 125% or 150% display scaling that corner was off
+        the edge of the screen entirely, so Multi Vendor Search could not be
+        seen, let alone clicked. It now has its own full-width row directly
+        under the title, left-aligned with the search controls it drives -
+        the first place anybody looks, and nowhere near an edge.
+        """
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.pack(fill="x", padx=20, pady=(20, 8))
+        wrap_children(bar)
         ctk.CTkLabel(
-            left, text="Search Vendor Details", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
+            bar, text="Search Vendor Details", font=theme.h1_font(), text_color=theme.TEXT_PRIMARY
         ).pack(anchor="w")
         ctk.CTkLabel(
-            left,
+            bar,
             text="Look up one vendor's full profile, or check many vendor codes at once.",
             font=theme.small_font(),
             text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w", pady=(2, 0))
 
-        seg = ctk.CTkSegmentedButton(
-            bar,
-            values=["Single Vendor Search", "Multi Vendor Search"],
+        switch_row = ctk.CTkFrame(self, fg_color="transparent")
+        switch_row.pack(fill="x", padx=20, pady=(0, 12))
+        ctk.CTkLabel(
+            switch_row, text="SEARCH", font=theme.label_font(),
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 10))
+        self.mode_switch = ctk.CTkSegmentedButton(
+            switch_row,
+            values=[SINGLE_MODE, MULTI_MODE],
             command=self._on_mode_change,
             selected_color=theme.ACCENT,
             selected_hover_color=theme.ACCENT_HOVER,
@@ -63,16 +76,30 @@ class SearchTab(ctk.CTkFrame):
             font=theme.font(12, "bold"),
             height=36,
         )
-        seg.set("Single Vendor Search")
-        seg.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.mode_switch.set(SINGLE_MODE)
+        self.mode_switch.pack(side="left")
+        self.mode_hint = ctk.CTkLabel(
+            switch_row, text="One vendor code at a time.",
+            font=theme.small_font(), text_color=theme.TEXT_MUTED,
+        )
+        self.mode_hint.pack(side="left", padx=14)
+
+    def show_mode(self, value):
+        """Switch modes from anywhere - the segmented button follows."""
+        self.mode_switch.set(value)
+        self._on_mode_change(value)
 
     def _on_mode_change(self, value):
-        if value.startswith("Single"):
+        if value == SINGLE_MODE:
             self.multi_frame.pack_forget()
             self.single_frame.pack(fill="both", expand=True)
+            self.mode_hint.configure(text="One vendor code at a time.")
         else:
             self.single_frame.pack_forget()
             self.multi_frame.pack(fill="both", expand=True)
+            self.mode_hint.configure(
+                text="Paste or type many vendor codes - one per line, or comma separated."
+            )
 
     # -------------------------------------------------------- single mode --
     def _build_single(self):
@@ -225,24 +252,53 @@ class SearchTab(ctk.CTkFrame):
 
     # --------------------------------------------------------- multi mode --
     def _build_multi(self):
-        split = ctk.CTkFrame(self.multi_frame, fg_color="transparent")
-        split.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        """Codes in at the top, results underneath.
 
-        left = card(split, fg_color=theme.BG_CARD, width=280)
-        left.pack(side="left", fill="y", padx=(0, 14))
-        left.pack_propagate(False)
-        section_label(left, "VENDOR CODES").pack(anchor="w", padx=16, pady=(16, 0))
+        This used to be a tall fixed-size card down the left-hand side with
+        the Search button below the text box. The card does not grow to fit
+        its contents, so on a short panel - a laptop at 150% display
+        scaling leaves this screen about 130 pixels tall - the text box took
+        every pixel and the Search button was never drawn at all. There was
+        then no way to run a multi-vendor search.
+
+        An input bar across the top cannot fail that way: it asks for a
+        fixed height, the results table takes whatever is left, and the
+        button sits next to the box it belongs to at any size.
+        """
+        holder = ctk.CTkFrame(self.multi_frame, fg_color="transparent")
+        holder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        holder.grid_rowconfigure(1, weight=1)
+        holder.grid_columnconfigure(0, weight=1)
+
+        box = card(holder, fg_color=theme.BG_CARD)
+        box.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        # The actions get their own column, reserved before the text box, so
+        # a wide input can never push them out of the card.
+        box.grid_columnconfigure(0, weight=1)
+        box.grid_columnconfigure(1, weight=0)
+
+        entry_side = ctk.CTkFrame(box, fg_color="transparent")
+        entry_side.grid(row=0, column=0, sticky="ew", padx=(16, 12), pady=14)
+        section_label(entry_side, "VENDOR CODES").pack(anchor="w")
         ctk.CTkLabel(
-            left, text="One per line, or paste a list", font=theme.small_font(), text_color=theme.TEXT_MUTED
-        ).pack(anchor="w", padx=16, pady=(0, 8))
+            entry_side, text="One per line, or separated by commas - paste a whole list.",
+            font=theme.small_font(), text_color=theme.TEXT_MUTED,
+        ).pack(anchor="w", pady=(0, 6))
         self.multi_text = ctk.CTkTextbox(
-            left, width=240, height=420, fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER, border_width=1
+            entry_side, height=84, fg_color=theme.BG_INPUT,
+            border_color=theme.BG_INPUT_BORDER, border_width=1,
         )
-        self.multi_text.pack(fill="both", expand=True, padx=16, pady=4)
-        primary_button(left, "Search", self.do_multi_search, width=248).pack(padx=16, pady=(10, 16))
+        self.multi_text.pack(fill="x")
 
-        right = ctk.CTkFrame(split, fg_color="transparent")
-        right.pack(side="left", fill="both", expand=True)
+        actions = ctk.CTkFrame(box, fg_color="transparent")
+        actions.grid(row=0, column=1, sticky="e", padx=(0, 16), pady=14)
+        primary_button(actions, "Search", self.do_multi_search, width=190).pack(
+            anchor="e", pady=(0, 8)
+        )
+        secondary_button(actions, "Clear", self.clear_multi, width=190).pack(anchor="e")
+
+        right = ctk.CTkFrame(holder, fg_color="transparent")
+        right.grid(row=1, column=0, sticky="nsew")
         right.grid_rowconfigure(1, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
@@ -258,6 +314,12 @@ class SearchTab(ctk.CTkFrame):
             right, DISPLAY_COLUMNS, WRAPPED_LABELS, COLUMN_WIDTHS, on_sort=self._on_multi_sort
         )
         outer.grid(row=1, column=0, sticky="nsew")
+
+    def clear_multi(self):
+        self.multi_text.delete("1.0", "end")
+        self.multi_results = []
+        self._populate_multi_tree()
+        self.multi_status.configure(text="No search performed yet.")
 
     def _multi_row_values(self, record):
         values = []

@@ -12,6 +12,7 @@ import customtkinter as ctk
 from vendor_app.gui import theme
 from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.widgets import card, primary_button, secondary_button, section_label
+from vendor_app.gui.util import fit_on_screen
 
 DEFAULT_ROWS = 200
 
@@ -26,13 +27,8 @@ class PasteRowsDialog(ctk.CTkToplevel):
 
         self.configure(fg_color=theme.BG_SURFACE)
         self.title(title)
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        height = min(720, max(420, screen_h - 100))
-        width = min(1500, max(700, screen_w - 80))
-        self.geometry(
-            f"{width}x{height}+{max(0,(screen_w-width)//2)}+{max(0,(screen_h-height)//4)}"
-        )
-        self.minsize(700, 420)
+        fit_on_screen(self, 1500, 720, min_w=700, min_h=420,
+                      margin_h=100, y_divisor=4)
         self.transient(master)
 
         self._build(title, note, rows)

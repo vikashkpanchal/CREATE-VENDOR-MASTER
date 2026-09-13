@@ -15,6 +15,7 @@ import customtkinter as ctk
 
 from vendor_app.gui import theme
 from vendor_app.gui.widgets import card, danger_button, divider, primary_button, secondary_button, section_label
+from vendor_app.gui.util import fit_on_screen
 
 
 def validate_cc(value: str):
@@ -54,10 +55,7 @@ class CCAddressDialog(ctk.CTkToplevel):
 
         self.configure(fg_color=theme.BG_SURFACE)
         self.title(self.flow_label)
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        width, height = min(620, max(460, screen_w - 120)), 330
-        self.geometry(f"{width}x{height}+{max(0,(screen_w-width)//2)}+{max(0,(screen_h-height)//3)}")
-        self.minsize(440, 300)
+        fit_on_screen(self, 620, 330, min_w=440, min_h=300, margin_w=120)
         self.resizable(True, False)
         self.transient(master)
 

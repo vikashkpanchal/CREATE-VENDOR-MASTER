@@ -10,6 +10,7 @@ import customtkinter as ctk
 from vendor_app.validators import ValidationError, normalize
 from vendor_app.gui import theme
 from vendor_app.gui.widgets import card, primary_button, secondary_button, section_label
+from vendor_app.gui.util import fit_on_screen
 
 
 class MissingEmailDialog(ctk.CTkToplevel):
@@ -22,11 +23,8 @@ class MissingEmailDialog(ctk.CTkToplevel):
 
         self.configure(fg_color=theme.BG_SURFACE)
         self.title("Missing Vendor Email Addresses")
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        height = min(640, max(400, screen_h - 140))
-        width = min(820, max(520, screen_w - 120))
-        self.geometry(f"{width}x{height}+{max(0,(screen_w-width)//2)}+{max(0,(screen_h-height)//3)}")
-        self.minsize(520, 380)
+        fit_on_screen(self, 820, 640, min_w=520, min_h=380,
+                      margin_w=120, margin_h=140)
         self.transient(master)
         self.grab_set()
         self._build()

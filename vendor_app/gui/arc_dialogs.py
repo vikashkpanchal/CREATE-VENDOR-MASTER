@@ -24,6 +24,7 @@ from vendor_app.validators import ValidationError, normalize
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
+from vendor_app.gui.util import fit_on_screen
 
 NOT_STATED = "(not stated)"
 
@@ -60,13 +61,7 @@ class _RecordDialog(ctk.CTkToplevel):
         self.configure(fg_color=theme.BG_SURFACE)
         self.title(self.TITLE_NEW if self.is_new else self.TITLE_EDIT)
 
-        screen_h, screen_w = self.winfo_screenheight(), self.winfo_screenwidth()
-        height = min(820, max(420, screen_h - 120))
-        width = min(680, max(440, screen_w - 80))
-        self.geometry(
-            f"{width}x{height}+{max(0, (screen_w - width) // 2)}+{max(0, (screen_h - height) // 3)}"
-        )
-        self.minsize(440, 380)
+        fit_on_screen(self, 680, 820, min_w=440, min_h=380, margin_h=120)
         self.transient(master)
         self.grab_set()
 

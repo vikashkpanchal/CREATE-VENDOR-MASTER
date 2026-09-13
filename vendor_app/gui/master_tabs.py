@@ -70,19 +70,36 @@ class _SubTabHost(ctk.CTkFrame):
 
 
 class VendorMasterTab(_SubTabHost):
-    def __init__(self, master, store, audit_log, on_data_changed=None):
+    """Records | Search | Dashboard | Supply Capability | Change Log.
+
+    The dashboard and the capability view both read the equipment master
+    alongside the vendor master, which is why the equipment store is passed
+    in: a supplier only means something next to what they supply.
+    """
+
+    def __init__(self, master, store, audit_log, equipment_store=None,
+                 on_data_changed=None):
         from vendor_app.gui.audit_tab import AuditLogTab
         from vendor_app.gui.master_screens import VendorRecordsScreen
         from vendor_app.gui.search_tab import SearchTab
+        from vendor_app.gui.vendor_capability_tab import VendorCapabilityTab
+        from vendor_app.gui.vendor_dashboard_tab import VendorDashboardTab
 
         self.store = store
         self.audit_log = audit_log
+        self.equipment_store = equipment_store or getattr(store, "equipment_store", None)
         super().__init__(master, {
             "Records": lambda parent: VendorRecordsScreen(
                 parent, store, on_data_changed=on_data_changed
             ),
             "Search": lambda parent: SearchTab(
                 parent, store, on_data_changed=on_data_changed
+            ),
+            "Dashboard": lambda parent: VendorDashboardTab(
+                parent, store, self.equipment_store, on_data_changed=on_data_changed
+            ),
+            "Supply Capability": lambda parent: VendorCapabilityTab(
+                parent, store, self.equipment_store
             ),
             "Change Log": lambda parent: AuditLogTab(
                 parent, audit_log, title="Vendor Change Log",
