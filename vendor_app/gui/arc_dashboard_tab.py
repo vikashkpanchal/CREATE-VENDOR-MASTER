@@ -133,6 +133,7 @@ class ArcDashboardTab(ctk.CTkFrame):
         self._build_kpis(body)
         self._build_arc_expiry(body)
         self._build_fo_expiry(body)
+        self._build_report_section(body, "fo_exhausted")
         self._build_report_section(body, "arc_without_fo")
         self._build_report_section(body, "pending_release")
         self._build_report_section(body, "value_difference")
@@ -245,7 +246,24 @@ class ArcDashboardTab(ctk.CTkFrame):
             anchor="w", justify="left", wraplength=900,
         )
         note_label.pack(anchor="w", pady=(2, 0))
+        # Wrap to the room the note actually has rather than to a fixed 900
+        # pixels. The count badge and the Export button hold the right-hand
+        # side of this row, so a longer note - the exhausted list carries a
+        # caveat when its rows do not add up - ran off the edge of the card
+        # and lost its last words. Reading the text column's own width is
+        # safe here: it is grid column 0 with the weight, so it takes the
+        # leftover space whatever the label inside it does.
+        text.bind(
+            "<Configure>",
+            lambda event, lab=note_label: self._wrap_note(lab, event.width),
+        )
         return box, head, note_label
+
+    @staticmethod
+    def _wrap_note(label, available_width):
+        wrap = max(240, (available_width or 0) - 8)
+        if label.cget("wraplength") != wrap:
+            label.configure(wraplength=wrap)
 
     def _report_table(self, parent, head, report_key, report):
         """The count badge, per-report export button and read-only grid."""

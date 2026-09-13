@@ -511,12 +511,37 @@ read rather than clipped.
 | --- | --- |
 | ARC Expiry Analysis | status donut, release position, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
 | FO Expiry Analysis | the same read on the frame orders - which need extending |
+| FO Value Exhausted | frame orders whose Opening Value has fallen under 10% of their Released Value - emptiest first |
 | ARC Without FO | a contract against which not one frame order has been raised, biggest first |
 | Pending Approval | release indicator `S` - nothing can be ordered against these yet, furthest through the approval chain first |
 | ARC vs FO Value Difference | `Target Val. (Header) - released against it`, ranked by the size of the gap either way |
 | Vendor Analysis | contract value against released value per vendor, as paired bars and as a table |
 | High Risk ARC / FO | expiring within 30 days, and (for a contract) with value still unreleased |
 | Export Reports | every table above in one workbook |
+
+**FO Value Exhausted** answers the question a date cannot: is there anything
+left to bill to this order? An order at 3% opening needs a top-up or a
+replacement before the balance runs out, and it needs one sooner than an
+order that merely expires next month - a date can be extended, an exhausted
+value cannot. The rule is `Opening Value < 10% of Released Value`, the
+threshold is one number in `config.py` (`FO_EXHAUSTED_PCT`) and the screen
+prints it wherever the figure appears.
+
+Two deliberate choices in that list:
+
+- **An order with no Released Value at all is left out.** There is no share
+  to take of nothing, and calling it 0% would fill the list with orders that
+  have not started rather than orders that are finishing.
+- **Rows that do not add up are flagged, not hidden.** Released should be
+  what has been drawn plus what is left; when it is not - most often an
+  Opening Value column that was never filled in - the row reads exactly like
+  an order that has run out. It stays in the list, and the note under the
+  section says how many of its rows are in that state, so they get checked
+  against SAP before anybody acts on them.
+
+The section carries **Opening % of Released** and **Value Used** alongside
+the three source figures, and the export's Summary sheet adds the count and
+the total value still sitting on those orders.
 
 Nineteen analyses back those sections: ARC and FO counts, values, active and
 expired counts, 30/60/90-day expiry buckets for both, ARC Without FO, the ARC

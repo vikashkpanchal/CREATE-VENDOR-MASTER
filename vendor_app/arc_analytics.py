@@ -31,8 +31,9 @@ from vendor_app.arc import (
     days_until, document_key, format_amount, format_date, parse_amount, split_vendor,
 )
 from vendor_app.config import (
-    ACTION_WINDOW, EXPIRY_WINDOWS, RELEASE_INDICATORS, RELEASE_PENDING,
-    RELEASE_RELEASED, describe_release_indicator, describe_release_status,
+    ACTION_WINDOW, EXPIRY_WINDOWS, FO_EXHAUSTED_PCT, RELEASE_INDICATORS,
+    RELEASE_PENDING, RELEASE_RELEASED, describe_release_indicator,
+    describe_release_status,
 )
 from vendor_app.validators import normalize
 
@@ -63,6 +64,8 @@ LABELS = {
     "released": "Released Value",
     "actual": "Actual Value",
     "opening": "Opening Value",
+    "opening_pct": "Opening % of Released",
+    "used": "Value Used",
     "difference": "Difference",
     "frame_count": "Frame Orders",
     "item_count": "Items",
@@ -90,6 +93,8 @@ WRAPPED_LABELS = {
     "released": "Released\nValue",
     "actual": "Actual\nValue",
     "opening": "Opening\nValue",
+    "opening_pct": "Opening %\nof Released",
+    "used": "Value\nUsed",
     "difference": "Difference\n(Target - Released)",
     "frame_count": "Frame\nOrders",
     "item_count": "Items",
@@ -108,17 +113,24 @@ WIDTHS = {
     "requisitioner": 140, "req_tracking_no": 130,
     "start": 105, "end": 105,
     "target_value": 135, "released": 130, "actual": 125, "opening": 125,
+    "opening_pct": 150, "used": 130,
     "difference": 165, "frame_count": 100, "item_count": 80, "arc_count": 85,
     "days_left": 100, "expiry_status": 140,
     "release_indicator": 175, "release_status": 165,
 }
 
-AMOUNT_COLUMNS = {"target_value", "released", "actual", "opening", "difference"}
+AMOUNT_COLUMNS = {"target_value", "released", "actual", "opening", "difference", "used"}
+
+# Shares, not money: shown as a percentage to one decimal place, and left
+# blank when there is nothing to take a share OF.
+PERCENT_COLUMNS = {"opening_pct"}
 
 
 def cell(row, key):
     """One report cell as text: amounts formatted, a missing date left blank."""
     value = row.get(key, "")
+    if key in PERCENT_COLUMNS:
+        return "" if value is None else f"{value:.1f}%"
     if key in AMOUNT_COLUMNS:
         return format_amount(value or 0.0)
     return "" if value is None else str(value)
@@ -259,6 +271,25 @@ class ArcAnalysis:
                 "days_left": left,
                 "expiry_status": _expiry_status(left),
             })
+
+        # How much of each order is left, as a share of what was released on
+        # it. Derived here, once, so the tile, the table and the export all
+        # read the same number.
+        for row in rows:
+            released, opening = row["released"], row["opening"]
+            row["used"] = released - opening
+            # A share of nothing is not zero, it is unanswerable: an order
+            # with no released value cannot be "90% used up", and calling it
+            # that would put it at the top of a list it does not belong on.
+            row["opening_pct"] = (opening / released * 100) if released else None
+            # Released should be what has been drawn plus what is left. When
+            # it is not, the row is incomplete rather than exhausted - most
+            # often an Opening Value column that was never filled in - and
+            # the exhausted list says so rather than quietly counting it as
+            # an order that has run out.
+            row["reconciles"] = bool(released) and abs(
+                row["actual"] + opening - released
+            ) <= max(1.0, released * 0.005)
         return rows
 
     # ------------------------------------------------ 1-14: counts & values --
@@ -332,6 +363,43 @@ class ArcAnalysis:
             [r for r in self.fos if not r["contract_known"]],
             key=lambda r: r["released"], reverse=True,
         )
+
+    # -------------------------------------------- FO value exhausted --
+    def fos_exhausted(self, threshold_pct=FO_EXHAUSTED_PCT):
+        """Frame orders whose Opening Value has fallen below `threshold_pct`
+        of their Released Value - the money on the order is all but gone.
+
+        This is the question asked when work is still running against an
+        order: is there anything left to bill to it? An order at 3% opening
+        needs a top-up or a replacement before the balance runs out, and it
+        needs it sooner than one that merely expires in a month, because a
+        date can be extended while an exhausted value cannot.
+
+        An order with no Released Value at all is left out. There is no
+        share to take of nothing, and treating it as 0% would fill the list
+        with orders that have not started rather than orders that are
+        finishing. Emptiest first, then by the value released, so the
+        largest exposure leads.
+        """
+        rows = [r for r in self.fos
+                if r["opening_pct"] is not None and r["opening_pct"] < threshold_pct]
+        return sorted(rows, key=lambda r: (r["opening_pct"], -r["released"]))
+
+    def exhausted_note(self, threshold_pct=FO_EXHAUSTED_PCT):
+        """The sentence under the exhausted list, including the caveat when
+        some of those rows do not add up."""
+        note = (f"Opening Value is under {threshold_pct}% of Released Value - "
+                "the order is all but drawn down, so anything still being "
+                "worked against it needs a top-up or a new order.")
+        unreconciled = sum(1 for r in self.fos_exhausted(threshold_pct)
+                           if not r["reconciles"])
+        if unreconciled:
+            note += (f"  Note: on {unreconciled} of these, Actual + Opening does "
+                     "not come to Released - most often an Opening Value column "
+                     "that was never filled in, which reads the same as an order "
+                     "that has run out. Check those rows against SAP before "
+                     "acting on them.")
+        return note
 
     def join_note(self):
         """A warning when the two files do not appear to line up."""
@@ -464,6 +532,8 @@ class ArcAnalysis:
              f"{len(self.arcs_expiring()):,}", "warn"),
             ("fo_expiring", f"FO Expiring in {ACTION_WINDOW} Days",
              f"{len(self.fos_expiring()):,}", "warn"),
+            ("fo_exhausted", f"FO Value Exhausted (<{FO_EXHAUSTED_PCT}% left)",
+             f"{len(self.fos_exhausted()):,}", "bad"),
             ("pending_release", "Pending Approval (S)",
              f"{len(self.pending_release()):,}", "warn"),
         ]
@@ -486,6 +556,12 @@ class ArcAnalysis:
         """
         window = ACTION_WINDOW
         return [
+            Report("fo_exhausted", f"FO Value Exhausted (<{FO_EXHAUSTED_PCT}% Left)",
+                   ["frame", "contract_no", "vendor_name", "description", "plant",
+                    "released", "actual", "opening", "opening_pct", "used",
+                    "end", "days_left", "expiry_status"],
+                   self.fos_exhausted(),
+                   self.exhausted_note()),
             Report("arc_without_fo", "ARC Without FO",
                    ["document", "vendor_name", "description", "plant", "start", "end",
                     "target_value", "days_left", "expiry_status"],
@@ -573,6 +649,8 @@ class ArcAnalysis:
             return self.report("arc_expiring")
         if key == "fo_expiring":
             return self.report("fo_expiring")
+        if key == "fo_exhausted":
+            return self.report("fo_exhausted")
         if key == "pending_release":
             return self.report("pending_release")
         raise KeyError(key)
@@ -622,6 +700,10 @@ class ArcAnalysis:
         rows += [(f"FO Expiring in Next {d} Days", f"{len(self.fos_expiring(d)):,}")
                  for d in windows]
         rows += [
+            (f"FO Value Exhausted (Opening under {FO_EXHAUSTED_PCT}% of Released)",
+             f"{len(self.fos_exhausted()):,}"),
+            ("Value Left On Exhausted FOs",
+             format_amount(sum(r["opening"] for r in self.fos_exhausted()))),
             ("ARC Without FO", f"{len(self.arcs_without_fo()):,}"),
             ("FO Without a Contract", f"{len(self.fos_without_arc()):,}"),
             ("ARC vs FO Value Difference",

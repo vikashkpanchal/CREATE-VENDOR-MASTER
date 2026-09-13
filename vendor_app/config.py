@@ -775,6 +775,13 @@ ARC_NUMERIC_FIELDS = {
 EXPIRY_WINDOWS = [30, 60, 90]
 ACTION_WINDOW = EXPIRY_WINDOWS[0]
 
+# A frame order counts as EXHAUSTED once its Opening Value has fallen below
+# this share of its Released Value - the order is all but drawn down, and
+# whatever is still being worked against it needs a top-up or a new order
+# before the balance runs out. One number, so the threshold is changed here
+# and nowhere else; the dashboard prints it wherever the figure is shown.
+FO_EXHAUSTED_PCT = 10
+
 # The ARC master keeps its own change log, keyed by the purchasing document -
 # which is exactly what makes the contract the key every amendment is filed
 # against, whether the change was to the contract, a frame order or an item.
