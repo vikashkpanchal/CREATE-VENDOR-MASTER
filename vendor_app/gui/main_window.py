@@ -24,7 +24,7 @@ from vendor_app.arc import ArcStore
 from vendor_app.audit import AuditLog, ChangeLog
 from vendor_app.config import (
     APP_TITLE, ARC_AUDIT_COLUMNS, ARC_AUDIT_FILE, AUDIT_FILE, EQUIPMENT_AUDIT_COLUMNS,
-    EQUIPMENT_AUDIT_FILE, EQUIPMENT_FILE,
+    EQUIPMENT_AUDIT_FILE, EQUIPMENT_FILE, build_stamp,
 )
 from vendor_app.data_manager import VendorStore
 from vendor_app.equipment import EquipmentStore
@@ -193,7 +193,9 @@ class MainWindow(ctk.CTk):
             text_color=theme.TEXT_PRIMARY,
         ).pack(anchor="w")
         ctk.CTkLabel(
-            title_col, text="Vendor, Equipment & Contract Management System",
+            title_col,
+            text=f"Vendor, Equipment & Contract Management System  \u00b7  "
+                 f"Build {build_stamp()}",
             font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
         ).pack(anchor="w")
 

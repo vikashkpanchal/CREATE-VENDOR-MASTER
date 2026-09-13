@@ -5,6 +5,42 @@ import os
 APP_TITLE = "P&M Master Management System"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Which build this copy is, shown in the header. The VERSION file ships in
+# the distributed .zip with the real commit and date substituted into it by
+# git archive; a working tree still holds the placeholders, and a copy with
+# no VERSION file at all says so rather than guessing. It exists so that
+# "am I running the new one?" is answered by looking at the window instead
+# of by comparing folders.
+VERSION_FILE = os.path.join(BASE_DIR, "VERSION")
+
+
+def build_stamp() -> str:
+    """A short, human-readable build id - "13 Sep 2026 (3ccd3a7)" - or a
+    plain note when this copy was not built from a released archive."""
+    try:
+        with open(VERSION_FILE, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return "unreleased build"
+
+    fields = {}
+    for line in text.splitlines():
+        if ":" in line:
+            name, _, value = line.partition(":")
+            fields[name.strip().lower()] = value.strip()
+
+    commit, built = fields.get("commit", ""), fields.get("built", "")
+    if commit.startswith("$Format") or not commit:
+        return "development copy"
+
+    stamp = commit[:7]
+    try:
+        from datetime import datetime
+        when = datetime.fromisoformat(built).strftime("%d %b %Y")
+        return f"{when} ({stamp})"
+    except (ValueError, TypeError):
+        return stamp
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DATA_FILE = os.path.join(DATA_DIR, "vendor_master_store.csv")
 AUDIT_FILE = os.path.join(DATA_DIR, "vendor_audit_log.csv")
