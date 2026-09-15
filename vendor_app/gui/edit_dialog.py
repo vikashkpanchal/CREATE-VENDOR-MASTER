@@ -21,14 +21,19 @@ from vendor_app.gui.util import fit_on_screen
 CHOICE_FIELDS = {"vendor_type": VENDOR_TYPE_VALUES}
 NOT_SET = "(not set)"
 
+# (title, fields, how wide the card is). A "half" card takes one of the two
+# columns, so the two contact blocks sit side by side instead of one under
+# the other - which is what gets the whole record onto one screen.
 SECTIONS = [
     # Type sits with Status at the end of the vendor block: both are choices
     # about the vendor rather than parts of its identity, and both come after
     # the mandated fields in the grid and the export too.
-    ("VENDOR", ["vendor_code", "vendor_name", "vendor_email", "vendor_type"]),
-    ("LOCATION", ["city", "state"]),
-    ("CONTACT PERSON 1", ["vendor_owner_name", "vendor_owner_contact", "vendor_owner_email"]),
-    ("CONTACT PERSON 2", ["vendor_supervisor_name", "vendor_supervisor_contact", "vendor_supervisor_email"]),
+    ("VENDOR", ["vendor_code", "vendor_name", "vendor_email", "vendor_type"], "full"),
+    ("LOCATION", ["city", "state"], "full"),
+    ("CONTACT PERSON 1",
+     ["vendor_owner_name", "vendor_owner_contact", "vendor_owner_email"], "half"),
+    ("CONTACT PERSON 2",
+     ["vendor_supervisor_name", "vendor_supervisor_contact", "vendor_supervisor_email"], "half"),
 ]
 
 
@@ -43,10 +48,13 @@ class EditVendorDialog(ctk.CTkToplevel):
         self.configure(fg_color=theme.BG_SURFACE)
         self.title("Add Vendor Record" if self.is_new else "Edit Vendor Record")
 
-        # Fit the dialog to the screen rather than assuming 740px of height is
-        # available - on a laptop / scaled display a fixed-height dialog can
-        # extend past the bottom of the screen, taking the Save button with it.
-        fit_on_screen(self, 560, 740, min_w=420, min_h=380, margin_h=120)
+        # Wide enough to read, and laid out two fields to a row (see
+        # _build_form). A 560px single column meant twelve fields in a
+        # letterbox, five visible at a time with the rest behind a scroll -
+        # the whole record is the point of this dialog, so it is sized to
+        # show it. Still fitted to the real screen, so Save is never off the
+        # bottom edge on a laptop or at 150% display scaling.
+        fit_on_screen(self, 980, 860, min_w=720, min_h=520, margin_h=100)
         self.transient(master)
         self.grab_set()
 
@@ -75,7 +83,7 @@ class EditVendorDialog(ctk.CTkToplevel):
         )
         ctk.CTkLabel(
             header, text=hint_text, font=theme.small_font(), text_color=theme.TEXT_SECONDARY,
-            wraplength=500, justify="left",
+            wraplength=900, justify="left",
         ).pack(anchor="w", pady=(4, 0))
 
         # Pack the action bar FIRST, anchored to the bottom edge. Tk gives
@@ -88,74 +96,95 @@ class EditVendorDialog(ctk.CTkToplevel):
         secondary_button(buttons, "Cancel", self.destroy, width=120).pack(side="right")
 
         wrapper = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        wrapper.pack(fill="both", expand=True, padx=20, pady=10)
+        wrapper.pack(fill="both", expand=True, padx=20, pady=(6, 6))
+        for column in range(self.COLUMNS):
+            wrapper.grid_columnconfigure(column, weight=1, uniform="section")
 
-        for title, keys in SECTIONS:
+        row = column = 0
+        for title, keys, width in SECTIONS:
             box = card(wrapper, fg_color=theme.BG_CARD)
-            box.pack(fill="x", pady=(0, 14))
-            section_label(box, title).pack(anchor="w", padx=18, pady=(14, 4))
-            divider(box).pack(fill="x", padx=18, pady=(0, 10))
+            if width == "half":
+                box.grid(row=row, column=column, sticky="nsew",
+                         padx=(0, 12) if column == 0 else (0, 0), pady=(0, 10))
+                column += 1
+                if column >= self.COLUMNS:
+                    column, row = 0, row + 1
+            else:
+                if column:                       # finish a part-filled row first
+                    column, row = 0, row + 1
+                box.grid(row=row, column=0, columnspan=self.COLUMNS,
+                         sticky="ew", pady=(0, 10))
+                row += 1
 
-            for key in keys:
-                row = ctk.CTkFrame(box, fg_color="transparent")
-                row.pack(fill="x", padx=18, pady=6)
-                label_text = LABELS[key] + (" *" if key == "vendor_code" else "")
-                ctk.CTkLabel(
-                    row, text=label_text, width=210, anchor="w", font=theme.body_font(),
-                    text_color=theme.TEXT_SECONDARY,
-                ).pack(side="left")
+            section_label(box, title).pack(anchor="w", padx=18, pady=(12, 2))
+            divider(box).pack(fill="x", padx=18, pady=(0, 8))
 
-                if key in CHOICE_FIELDS:
-                    current = (self.record.get(key, "") or "").upper()
-                    var = ctk.StringVar(
-                        value=current if current in CHOICE_FIELDS[key] else NOT_SET
-                    )
-                    ctk.CTkOptionMenu(
-                        row, variable=var, values=[NOT_SET] + list(CHOICE_FIELDS[key]),
-                        width=200, height=32,
-                        fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
-                        button_hover_color=theme.BG_HOVER,
-                        dropdown_fg_color=theme.BG_CARD_ALT,
-                    ).pack(side="left")
-                    self.vars[key] = var
-                    continue
+            grid = ctk.CTkFrame(box, fg_color="transparent")
+            grid.pack(fill="x", padx=18, pady=(0, 6))
+            # A half-width card holds one field per row; a full-width one two.
+            columns = self.COLUMNS if width == "full" else 1
+            for index in range(columns):
+                grid.grid_columnconfigure(index, weight=1, uniform="field")
 
-                var = ctk.StringVar(value=self.record.get(key, ""))
-                entry = ctk.CTkEntry(
-                    row, textvariable=var, height=32,
-                    fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
-                )
-                entry.pack(side="left", fill="x", expand=True)
+            cells = list(keys) + (["status"] if title == "VENDOR" else [])
+            for index, key in enumerate(cells):
+                self._add_field(grid, key, index // columns, index % columns)
 
-                if key == "vendor_code" and not self.is_new:
-                    # readonly (not disabled): the primary key must never be
-                    # edited, but the user still needs to select and copy it.
-                    entry.configure(state="readonly", text_color=theme.TEXT_PRIMARY)
-                elif self._first_entry is None:
-                    self._first_entry = entry
+            ctk.CTkFrame(box, fg_color="transparent", height=2).pack()
 
-                self.vars[key] = var
+    # Two fields to a row. The dialog's minimum width keeps both columns
+    # readable, so this never needs to reflow - and a fixed arrangement
+    # cannot oscillate the way a measured one can.
+    COLUMNS = 2
 
-            if title == "VENDOR":
-                status_row = ctk.CTkFrame(box, fg_color="transparent")
-                status_row.pack(fill="x", padx=18, pady=6)
-                ctk.CTkLabel(
-                    status_row, text="Status", width=210, anchor="w", font=theme.body_font(),
-                    text_color=theme.TEXT_SECONDARY,
-                ).pack(side="left")
-                ctk.CTkOptionMenu(
-                    status_row,
-                    variable=self.status_var,
-                    values=STATUS_VALUES,
-                    width=200,
-                    height=32,
-                    fg_color=theme.BG_INPUT,
-                    button_color=theme.BG_CARD_ALT,
-                    button_hover_color=theme.BG_HOVER,
-                    dropdown_fg_color=theme.BG_CARD_ALT,
-                ).pack(side="left")
+    def _add_field(self, parent, key, row, column):
+        """One labelled field - entry, or dropdown for a choice - in a cell."""
+        cell = ctk.CTkFrame(parent, fg_color="transparent")
+        cell.grid(row=row, column=column, sticky="ew", padx=(0, 14), pady=5)
+        cell.grid_columnconfigure(0, weight=1)
 
-            ctk.CTkFrame(box, fg_color="transparent", height=6).pack()
+        label_text = ("Status" if key == "status"
+                      else LABELS[key] + (" *" if key == "vendor_code" else ""))
+        ctk.CTkLabel(
+            cell, text=label_text, anchor="w", font=theme.small_font(),
+            text_color=theme.TEXT_SECONDARY,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 3))
+
+        if key == "status":
+            ctk.CTkOptionMenu(
+                cell, variable=self.status_var, values=STATUS_VALUES, height=34,
+                fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+                button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            ).grid(row=1, column=0, sticky="ew")
+            return
+
+        if key in CHOICE_FIELDS:
+            current = (self.record.get(key, "") or "").upper()
+            var = ctk.StringVar(value=current if current in CHOICE_FIELDS[key] else NOT_SET)
+            ctk.CTkOptionMenu(
+                cell, variable=var, values=[NOT_SET] + list(CHOICE_FIELDS[key]), height=34,
+                fg_color=theme.BG_INPUT, button_color=theme.BG_CARD_ALT,
+                button_hover_color=theme.BG_HOVER, dropdown_fg_color=theme.BG_CARD_ALT,
+            ).grid(row=1, column=0, sticky="ew")
+            self.vars[key] = var
+            return
+
+        var = ctk.StringVar(value=self.record.get(key, ""))
+        entry = ctk.CTkEntry(
+            cell, textvariable=var, height=34,
+            fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
+            font=theme.body_font(),
+        )
+        entry.grid(row=1, column=0, sticky="ew")
+
+        if key == "vendor_code" and not self.is_new:
+            # readonly (not disabled): the primary key must never be edited,
+            # but the user still needs to select and copy it.
+            entry.configure(state="readonly", text_color=theme.TEXT_PRIMARY)
+        elif self._first_entry is None:
+            self._first_entry = entry
+
+        self.vars[key] = var
 
     def _focus_first_field(self):
         if self._first_entry is not None:

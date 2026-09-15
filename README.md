@@ -149,6 +149,12 @@ Both masters share the same screen design, and both behave the same way.
   who made it. Each is filterable and exports to `.xlsx` on its own.
 - **Dialogs always fit.** Every dialog sizes itself to the actual screen and
   reserves its buttons before its body, so Save can never end up off-screen.
+- **The record dialogs are laid out two fields to a row.** The vendor dialog
+  was a 560px single column - twelve fields in a letterbox, five visible at a
+  time with the rest behind a scroll. It is 980px wide now, two fields across,
+  with the two contact blocks side by side, so most of the record is on screen
+  at once. It is still fitted to the real display, so Save stays reachable on
+  a laptop and at 150% scaling.
 - **Windows display scaling is respected, not multiplied.** CustomTkinter
   multiplies every size it is given by the Windows scaling factor, so a
   window asked for 1286x678 on a 1366x768 laptop set to 150% was created
@@ -263,10 +269,13 @@ Both are only ever filled in or corrected from the masters. When the FO No is
 blank, or the frame order or contract is not on file, **whatever was typed
 stays** — which is what makes manual entry the fallback rather than something
 the app overwrites. The derivation runs on every add, import, paste and
-single-cell edit; **Re-link ARC / Plant** on the Records screen re-runs it
-across the whole fleet, for when a frame order is loaded or a contract's
-plant is corrected after the machines were entered. Every change it makes is
-written to the change log.
+single-cell edit, **and automatically whenever either master moves** -
+loading the contracts after the equipment is the ordinary order of events,
+and until that ran on its own the Plant Code stayed blank until somebody
+thought to press a button. **Re-link ARC / Plant** on the Records screen is
+still there to force it. It only writes when something actually changed, so
+a settled master costs a few thousand dictionary lookups and no disk at all,
+and every change it does make is written to the change log.
 
 ### Shift and Lease Type
 
@@ -704,6 +713,14 @@ listing all of them. Nothing is sent: every message is saved as an Outlook
   machine in the email table. A machine referenced twice by different
   identifiers is listed once. Drafts go to **"Equipment Breakdown"**.
 
+  **An identifier that is not in the Equipment Master is said out loud.** A
+  window lists every one that could not be found, says how many machines did
+  resolve, and has to be closed before the run goes on - a line of small text
+  under the toolbar was too easy to miss, and the run then looked like it had
+  worked, minus a few vendors nobody noticed. **Copy List** puts those
+  identifiers on the clipboard, ready to paste back once the machines are on
+  the master.
+
 Recipient addresses come from the vendor master. If a vendor has no email on
 file, a dialog lists those vendors so you can enter an address (saved back to
 the vendor master and logged) or tick **Skip**.
@@ -714,9 +731,40 @@ Equipment Breakdown panels each carry their own CC address, shown and edited
 on that panel. Each is asked for once, on first use of that flow, and reused
 from then on; changing one leaves the other untouched. Change either via its
 "Change CC" button or by clicking its CC pill: the dialog opens pre-filled so
-you can edit it in place, validates before saving, and has a separate
-"Clear CC". An address saved by an earlier single-CC build is carried across
-to both rows on first run, so nothing is lost and you are not asked again.
+you can edit it in place and has a separate "Clear CC". An address saved by an
+earlier single-CC build is carried across to both rows on first run, so
+nothing is lost and you are not asked again.
+
+**The CC field accepts what Outlook accepts.** Entries may be separated by a
+semicolon, a comma or a newline - pasting a column straight out of Excel is
+the normal way this gets filled - and all four of these are valid:
+
+| Form | Example |
+| --- | --- |
+| A plain address | `site.cell@ril.com` |
+| Copied out of Outlook | `Vikash Panchal <v.panchal@ril.com>` |
+| An internal domain with no dot | `v.panchal@ril` |
+| A distribution list or address-book name | `P&M Cell` |
+
+Being stricter than Outlook only blocks addresses that would have worked, and
+Outlook - not this app - is what resolves a recipient. Duplicates are dropped
+and the result is stored semicolon-separated, which is the form Outlook
+expects. Genuinely broken entries (two @ signs, a stray angle bracket, a
+space inside an address) are still refused, with the offending entry named.
+
+### Attachments
+
+Each flow carries an **Attach** row beside its CC row: **Add Files** puts one
+or more files on **every draft that run creates** - the covering note, the
+photograph of the breakdown - and **Clear** empties the list. The pill names
+the first couple and counts the rest, the preview lists them, and the
+confirmation says how many are going on each draft.
+
+Attachments are held for the session only: a file path is not data worth
+saving, and the file may not be there tomorrow. If one has been moved or
+renamed since you picked it, you are told before any draft is created and can
+go ahead without it; a file that fails to attach is reported against that
+draft rather than costing you the batch.
 
 "Preview Selected" opens the exact email in your browser before any draft is
 created. Email tables use a thick outer border, bold header row and

@@ -16,7 +16,7 @@ asked for once and reused from then on.
 import webbrowser
 import tempfile
 import os
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -25,14 +25,12 @@ from vendor_app.config import (
     CC_DEFECTIVE_KEY,
     CC_FLOW_LABELS,
     DEFECTIVE_INVOICE_KEYS,
-    DEFECTIVE_INVOICE_LABELS,
     OUTLOOK_BREAKDOWN_FOLDER,
     OUTLOOK_DEFECTIVE_FOLDER,
 )
 from vendor_app.communication import (
     build_breakdown_messages,
     build_defective_invoice_messages,
-    parse_identifiers,
     parse_pasted_rows,
     resolve_breakdown_rows,
 )
@@ -75,6 +73,10 @@ class _EmailFlow(ctk.CTkFrame):
         self.settings = settings
         self.on_data_changed = on_data_changed
         self.messages = []
+        # Files put on every draft this run creates. Held for the session
+        # only - a path is not data worth saving, and the file it points at
+        # may not be there tomorrow.
+        self.attachments = []
         self._skip_codes = set()
         self._build()
 
@@ -104,7 +106,7 @@ class _EmailFlow(ctk.CTkFrame):
 
         right = ctk.CTkFrame(split, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
-        right.grid_rowconfigure(3, weight=1)
+        right.grid_rowconfigure(4, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
         # This row is laid out with grid, NOT pack. With pack, a long status
@@ -145,15 +147,37 @@ class _EmailFlow(ctk.CTkFrame):
         )
         self._refresh_cc_pill()
 
+        # Attachments ride on every draft in the run - the covering note, the
+        # photograph of the breakdown - so they sit with the CC row rather
+        # than with any one message.
+        attach_row = ctk.CTkFrame(right, fg_color="transparent")
+        attach_row.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        ctk.CTkLabel(
+            attach_row, text="Attach:", font=theme.small_font(),
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 8))
+        self.attach_pill = pill(attach_row, "", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
+        self.attach_pill.pack(side="left")
+        self.attach_pill.configure(cursor="hand2")
+        self.attach_pill.bind("<Button-1>", lambda e: self.add_attachments())
+        secondary_button(attach_row, "Add Files", self.add_attachments, width=110).pack(
+            side="left", padx=(8, 0)
+        )
+        self.clear_attach_button = secondary_button(
+            attach_row, "Clear", self.clear_attachments, width=90,
+        )
+        self.clear_attach_button.pack(side="left", padx=(8, 0))
+        self._refresh_attach_pill()
+
         # The status line gets a row to itself, so however long the message
         # runs it can never squeeze the buttons or the CC controls.
         self.status_pill = pill(
             right, self.EMPTY_HINT, fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY
         )
-        self.status_pill.grid(row=2, column=0, sticky="w", pady=(0, 8))
+        self.status_pill.grid(row=3, column=0, sticky="w", pady=(0, 8))
 
         wrap = card(right, fg_color=theme.BG_CARD)
-        wrap.grid(row=3, column=0, sticky="nsew")
+        wrap.grid(row=4, column=0, sticky="nsew")
         wrap.grid_rowconfigure(0, weight=1)
         wrap.grid_columnconfigure(0, weight=1)
         outer, self.tree = build_table(wrap, PREVIEW_COLUMNS, PREVIEW_LABELS, PREVIEW_WIDTHS)
@@ -274,13 +298,51 @@ class _EmailFlow(ctk.CTkFrame):
             f'<p style="background:#eee; padding:8px; border:1px solid #ccc;">'
             f'<b>To:</b> {message["to"]}<br>'
             f'<b>Cc:</b> {cc or "(none)"}<br>'
-            f'<b>Subject:</b> {message["subject"]}'
+            + (f'<b>Attached:</b> '
+               f'{", ".join(os.path.basename(p) for p in self.attachments)}<br>'
+               if self.attachments else "")
+            + f'<b>Subject:</b> {message["subject"]}'
             f"</p></div>" + message["body_html"]
         )
         path = os.path.join(tempfile.gettempdir(), f"vm_preview_{message['vendor_code']}.html")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(html)
         webbrowser.open(f"file://{path}")
+
+    # -------------------------------------------------------- attachments --
+    def _refresh_attach_pill(self):
+        count = len(self.attachments)
+        if count:
+            names = ", ".join(os.path.basename(p) for p in self.attachments[:2])
+            if count > 2:
+                names += f" +{count - 2} more"
+            self.attach_pill.configure(text=f"  {names}  ")
+        else:
+            self.attach_pill.configure(text="  (none)  ")
+        self.clear_attach_button.configure(state="normal" if count else "disabled")
+
+    def add_attachments(self):
+        """Pick files to put on every draft this run creates."""
+        paths = filedialog.askopenfilenames(
+            title="Attach files to every draft",
+            filetypes=[("All files", "*.*")],
+        )
+        added = 0
+        for path in paths or ():
+            if path not in self.attachments:
+                self.attachments.append(path)
+                added += 1
+        if added:
+            self._refresh_attach_pill()
+            notify(self, f"{added} file(s) will be attached to every draft.")
+
+    def clear_attachments(self):
+        self.attachments = []
+        self._refresh_attach_pill()
+
+    def _missing_attachments(self):
+        """Attachments that are no longer where they were chosen from."""
+        return [p for p in self.attachments if not os.path.isfile(p)]
 
     # ----------------------------------------------------------------- CC --
     @property
@@ -340,15 +402,28 @@ class _EmailFlow(ctk.CTkFrame):
         confirmed = messagebox.askyesno(
             "Create Outlook Drafts",
             f"Create {len(self.messages)} draft email(s) in the Outlook folder "
-            f"'{self.FOLDER}'?\n\nOne email per vendor. Nothing is sent - every "
-            "message is saved as a draft for you to review.",
+            f"'{self.FOLDER}'?\n\nOne email per vendor"
+            + (f", each with {len(self.attachments)} attachment(s)"
+               if self.attachments else "")
+            + ". Nothing is sent - every message is saved as a draft for you "
+              "to review.",
         )
         if not confirmed:
             return
 
+        missing = self._missing_attachments()
+        if missing and not messagebox.askyesno(
+            "Attachment Not Found",
+            "These files are no longer where they were picked from:\n\n"
+            + "\n".join(os.path.basename(p) for p in missing)
+            + "\n\nCreate the drafts without them?",
+        ):
+            return
+
         try:
             result = outlook.create_drafts(
-                self.messages, self.FOLDER, cc_addresses=self.cc_address
+                self.messages, self.FOLDER, cc_addresses=self.cc_address,
+                attachments=[p for p in self.attachments if os.path.isfile(p)],
             )
         except outlook.OutlookError as exc:
             messagebox.showerror("Outlook Error", str(exc))
@@ -439,12 +514,17 @@ class EquipmentBreakdownFlow(_EmailFlow):
             return None
 
         resolved = resolve_breakdown_rows(self.equipment_store, pairs)
-        if not resolved["records"]:
-            messagebox.showwarning(
-                "Not Found",
-                "None of those identifiers are in the Equipment Master.\n\n"
-                "Add the equipment first from the Equipment Master tab.",
+        # Say it out loud. A machine that is not on the master produces no
+        # email, and a line of small text under the toolbar was too easy to
+        # miss - the run looked like it had worked, minus a few vendors
+        # nobody noticed. The window lists them and has to be closed.
+        if resolved["missing"]:
+            from vendor_app.gui.missing_equipment_dialog import MissingEquipmentDialog
+            dialog = MissingEquipmentDialog(
+                self, resolved["missing"], found=len(resolved["records"])
             )
+            dialog.wait_window()
+        if not resolved["records"]:
             return None
 
         result = build_breakdown_messages(self.store, resolved["records"], skip_codes=skip_codes)

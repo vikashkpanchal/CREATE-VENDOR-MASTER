@@ -11,6 +11,8 @@ current address into an editable field instead, and separates "save what I
 typed" from "clear the CC entirely".
 """
 
+import re
+
 import customtkinter as ctk
 
 from vendor_app.gui import theme
@@ -18,23 +20,78 @@ from vendor_app.gui.widgets import card, danger_button, divider, primary_button,
 from vendor_app.gui.util import fit_on_screen
 
 
-def validate_cc(value: str):
-    """Validate a ';'-separated CC list. Returns (cleaned, error_or_None).
+# An entry with no "@" at all - a distribution list or a name out of the
+# address book ("P&M Cell", "RIL-PM-CELL"). Outlook resolves these against
+# the GAL, so they are accepted; anything with a character an address book
+# entry would never carry is not.
+_ALIAS_RE = re.compile(r"^[\w.&'\- ]+$", re.UNICODE)
+# "Vikash Panchal <vikash.panchal@ril.com>" - what you get when a recipient
+# is copied out of Outlook.
+_DISPLAY_RE = re.compile(r"^(?P<name>[^<>]*)<(?P<addr>[^<>]+)>$")
 
-    Blank is valid and means "no CC". Kept deliberately permissive - this
-    only catches obvious typos, Outlook does the real resolving.
+
+def _check_address(address: str):
+    """One CC entry. Returns (cleaned, error_or_None).
+
+    Deliberately permissive, because Outlook - not this app - resolves
+    recipients, and being stricter than Outlook only blocks addresses that
+    would have worked. A plant address book is full of entries this used to
+    reject: internal domains with no dot in them (name@ril), distribution
+    lists with no "@" at all, and the "Name <address>" form that comes from
+    copying a recipient out of Outlook itself.
     """
-    text = (value or "").strip().strip(";").strip()
+    text = address.strip().strip(",").strip()
     if not text:
         return "", None
 
-    addresses = [a.strip() for a in text.replace(",", ";").split(";") if a.strip()]
-    for address in addresses:
-        if address.count("@") != 1 or " " in address:
-            return None, f"'{address}' is not a valid email address."
-        local, _, domain = address.partition("@")
-        if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
-            return None, f"'{address}' is not a valid email address."
+    match = _DISPLAY_RE.match(text)
+    if match:
+        inner = match.group("addr").strip()
+        if inner.count("@") != 1 or " " in inner:
+            return None, f"'{text}' is not a valid email address."
+        return text, None
+
+    if "<" in text or ">" in text:
+        return None, (f"'{text}' has a stray < or > - write it as "
+                      "Name <address@company.com>.")
+
+    if "@" not in text:
+        if _ALIAS_RE.match(text):
+            return text, None          # a distribution list or address-book name
+        return None, f"'{text}' is not an email address or an address-book name."
+
+    if text.count("@") != 1:
+        return None, f"'{text}' has more than one @."
+    local, _, domain = text.partition("@")
+    if not local or not domain or " " in text:
+        return None, f"'{text}' is not a valid email address."
+    if domain.startswith(".") or domain.endswith("."):
+        return None, f"'{text}' has a misplaced dot in its domain."
+    return text, None
+
+
+def validate_cc(value: str):
+    """Validate a CC list. Returns (cleaned, error_or_None).
+
+    Entries may be separated by a semicolon, a comma or a newline - pasting
+    a column straight out of Excel is the normal way this field gets
+    filled - and the cleaned result is always semicolon-separated, which is
+    what Outlook expects.
+
+    Blank is valid and means "no CC".
+    """
+    text = (value or "").strip()
+    if not text:
+        return "", None
+
+    parts = [p for p in re.split(r"[;\n\r]+", text.replace(",", ";")) if p.strip()]
+    addresses = []
+    for part in parts:
+        cleaned, error = _check_address(part)
+        if error:
+            return None, error
+        if cleaned and cleaned not in addresses:
+            addresses.append(cleaned)
 
     return "; ".join(addresses), None
 

@@ -11,6 +11,7 @@ Importing this module is safe on any platform - pywin32 is imported lazily
 and OUTLOOK_AVAILABLE reports whether Outlook can actually be driven here.
 """
 
+import os
 import re
 
 # olFolderInbox / olMailItem / olFolderDrafts constants (avoids needing the
@@ -107,17 +108,35 @@ def _merge_body_with_signature(body_html: str, signature_html: str) -> str:
     return body_html + signature_html
 
 
+def _attach_files(mail, attachments):
+    """Attach each file to `mail`. Returns the names that could not be added.
+
+    A file that has been moved or renamed since it was chosen must not cost
+    the user the whole draft - the draft is still created, and the caller
+    reports which attachments did not make it.
+    """
+    missing = []
+    for path in attachments or []:
+        try:
+            mail.Attachments.Add(os.path.abspath(path))
+        except Exception:
+            missing.append(os.path.basename(path))
+    return missing
+
+
 def create_draft(
     to_addresses: str,
     subject: str,
     body_html: str,
     folder_name: str,
     cc_addresses: str = "",
+    attachments=None,
 ):
     """Save one draft into `folder_name` under the Inbox. Returns the item.
 
     `to_addresses` / `cc_addresses` are Outlook-style recipient strings -
-    multiple addresses separated by ';'.
+    multiple addresses separated by ';'. `attachments` is a list of file
+    paths, added to the draft in the order given.
     """
     app, namespace = _connect()
     folder = get_or_create_folder(namespace, folder_name)
@@ -131,6 +150,7 @@ def create_draft(
             mail.CC = cc_addresses
         mail.Subject = subject
         mail.HTMLBody = _merge_body_with_signature(body_html, signature)
+        _attach_files(mail, attachments)
 
         # Save first (lands in Drafts), then move into the target sub-folder.
         mail.Save()
@@ -142,10 +162,15 @@ def create_draft(
         raise OutlookError(f"Could not create the Outlook draft: {exc}") from exc
 
 
-def create_drafts(messages: list, folder_name: str, cc_addresses: str = "", progress=None):
+def create_drafts(messages: list, folder_name: str, cc_addresses: str = "",
+                  attachments=None, progress=None):
     """Create many drafts in one Outlook session.
 
     `messages` is a list of dicts with 'to', 'subject' and 'body_html'.
+    `attachments` is a list of file paths put on EVERY draft in the run -
+    the covering note, the photograph of the breakdown, whatever the batch
+    is about.
+
     Failures are collected per-message rather than aborting the batch, so one
     bad recipient never costs the user the rest of the run.
 
@@ -167,9 +192,12 @@ def create_drafts(messages: list, folder_name: str, cc_addresses: str = "", prog
                 mail.CC = cc_addresses
             mail.Subject = message.get("subject", "")
             mail.HTMLBody = _merge_body_with_signature(message.get("body_html", ""), signature)
+            failed_files = _attach_files(mail, attachments)
             mail.Save()
             mail.Move(folder)
             created += 1
+            if failed_files:
+                errors.append((label, "could not attach " + ", ".join(failed_files)))
         except Exception as exc:
             errors.append((label, str(exc)))
         if progress is not None:

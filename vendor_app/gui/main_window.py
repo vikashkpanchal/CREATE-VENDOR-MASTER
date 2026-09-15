@@ -313,6 +313,14 @@ class MainWindow(ctk.CTk):
     def refresh_all(self):
         """Keep every built view in step after any write, wherever it came from -
         an equipment import can create vendors, so both masters can move at once."""
+        # A machine's ARC No comes from its FO and its Plant Code from that
+        # ARC, so both have to be re-derived whenever either master moves -
+        # loading the contracts AFTER the equipment is the ordinary case, and
+        # until this ran on its own the plant code stayed blank until somebody
+        # thought to press Re-link. It only writes when something actually
+        # changed, so a settled master costs a few thousand dict lookups and
+        # no disk at all.
+        self.equipment_store.relink_all()
         active = sum(1 for r in self.store.all_records() if r.get("status") == "Active")
         self.record_badge.configure(
             text=f"  {active:,} Active Vendor{'s' if active != 1 else ''}  "
