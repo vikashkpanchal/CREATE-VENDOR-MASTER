@@ -14,7 +14,7 @@ from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
-from vendor_app.gui.util import fit_on_screen
+from vendor_app.gui.util import claim_focus, fit_on_screen
 
 # Vendor Type is a choice, not free text, so it is rendered as a dropdown
 # rather than an entry - there is no way to type a third value into it.
@@ -187,8 +187,11 @@ class EditVendorDialog(ctk.CTkToplevel):
         self.vars[key] = var
 
     def _focus_first_field(self):
+        # claim_focus rather than a single focus_set: on Windows the caret is
+        # otherwise lost when CustomTkinter withdraws and re-shows the window
+        # to recolour its title bar. See vendor_app/gui/util.py.
         if self._first_entry is not None:
-            self._first_entry.focus_set()
+            claim_focus(self, self._first_entry)
 
     def save(self):
         raw = {key: self.vars[key].get() for key in self.vars}

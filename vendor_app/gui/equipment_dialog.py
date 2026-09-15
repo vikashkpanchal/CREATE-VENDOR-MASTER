@@ -18,7 +18,7 @@ from vendor_app.validators import ValidationError
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
-from vendor_app.gui.util import fit_on_screen
+from vendor_app.gui.util import claim_focus, fit_on_screen
 
 CHOICE_FIELDS = {"lease_type": LEASE_TYPE_VALUES}
 NOT_SET = "(not set)"
@@ -140,8 +140,10 @@ class EquipmentDialog(ctk.CTkToplevel):
         self.vars[key] = var
 
     def _focus_first(self):
+        # See edit_dialog: a single focus_set does not survive the title-bar
+        # redraw CustomTkinter does on Windows.
         if self._first_entry is not None:
-            self._first_entry.focus_set()
+            claim_focus(self, self._first_entry)
 
     def save(self):
         if self.locked:

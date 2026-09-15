@@ -24,7 +24,7 @@ from vendor_app.validators import ValidationError, normalize
 from vendor_app.gui import theme
 from vendor_app.gui.toast import notify
 from vendor_app.gui.widgets import card, divider, primary_button, secondary_button, section_label
-from vendor_app.gui.util import fit_on_screen
+from vendor_app.gui.util import claim_focus, fit_on_screen
 
 NOT_STATED = "(not stated)"
 
@@ -170,8 +170,10 @@ class _RecordDialog(ctk.CTkToplevel):
         self.code_vars[key] = var
 
     def _focus_first(self):
+        # See edit_dialog: a single focus_set does not survive the title-bar
+        # redraw CustomTkinter does on Windows.
         if self._first_entry is not None:
-            self._first_entry.focus_set()
+            claim_focus(self, self._first_entry)
 
     def persist(self, raw):
         raise NotImplementedError

@@ -162,6 +162,23 @@ Both masters share the same screen design, and both behave the same way.
   side of it, off the edge of the screen. Every window and dialog now divides
   by that factor first, so the app fits the display at 100%, 125% and 150%
   alike. Verified on a 1366x768 screen at all three.
+- **A dialog is sized for the contents it actually has.** Its size is written
+  in design pixels and multiplied by the widget scaling, because a dialog
+  drawn at 150% genuinely needs half as much room again to hold the same
+  fields, and only then clamped to the display. Sizing it in raw screen
+  pixels while its contents were 1.5x bigger is what crushed the CC dialog's
+  address field to two pixels of height and left it undrawn - and a field
+  that is not really there cannot take the caret, so every keystroke was
+  thrown away and the box looked broken.
+- **The caret lands in the first field, and stays there.** A single
+  `focus_set()` is not enough on Windows: CustomTkinter recolours a new
+  window's title bar by withdrawing it, redrawing it and deiconifying it
+  milliseconds later, restoring focus to whatever was focused before the
+  dialog existed. Focus is therefore claimed repeatedly over the first half
+  second, and again whenever the window is re-entered - but only ever when
+  nothing inside that window holds it, so a field you clicked into yourself
+  is never taken from you. Clicking a field's border or padding puts the
+  caret in its text rather than on the canvas behind it.
 
 ### Vendors created automatically from equipment
 

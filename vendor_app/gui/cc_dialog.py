@@ -17,7 +17,7 @@ import customtkinter as ctk
 
 from vendor_app.gui import theme
 from vendor_app.gui.widgets import card, danger_button, divider, primary_button, secondary_button, section_label
-from vendor_app.gui.util import fit_on_screen
+from vendor_app.gui.util import claim_focus, fit_on_screen, focus_on_click
 
 
 # An entry with no "@" at all - a distribution list or a name out of the
@@ -121,17 +121,21 @@ class CCAddressDialog(ctk.CTkToplevel):
         # Grab only once the window actually exists, otherwise the grab can
         # land before the entry is mapped and swallow its first clicks.
         self.after(80, self._activate)
+        # ...and claim the caret repeatedly while the window settles, because
+        # on Windows a fixed delay is not enough on its own. See claim_focus.
+        claim_focus(self, self.entry)
 
     def _activate(self):
         try:
             self.grab_set()
         except Exception:
             pass
-        self.entry.focus_force()
-        # Select the whole address so typing replaces it, while a click or
-        # arrow key still drops the caret in for an ordinary edit.
-        self.entry.select_range(0, "end")
-        self.entry.icursor("end")
+        # Select the whole address so typing replaces it - but only while it
+        # is still untouched. Selecting text the user has already started
+        # typing would wipe it on their next keystroke.
+        if self.value_var.get() == self._initial_value:
+            self.entry.select_range(0, "end")
+            self.entry.icursor("end")
 
     def _build(self):
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -166,7 +170,8 @@ class CCAddressDialog(ctk.CTkToplevel):
         section_label(box, "EMAIL ADDRESS").pack(anchor="w", padx=18, pady=(14, 4))
         divider(box).pack(fill="x", padx=18, pady=(0, 10))
 
-        self.value_var = ctk.StringVar(value=self.settings.cc_for(self.cc_key))
+        self._initial_value = self.settings.cc_for(self.cc_key)
+        self.value_var = ctk.StringVar(value=self._initial_value)
         self.entry = ctk.CTkEntry(
             box, textvariable=self.value_var, height=36,
             placeholder_text="name@company.com",
@@ -176,6 +181,9 @@ class CCAddressDialog(ctk.CTkToplevel):
         self.entry.pack(fill="x", padx=18, pady=(0, 6))
         self.entry.bind("<Return>", lambda e: self._save())
         self.entry.bind("<Escape>", lambda e: self._cancel())
+        # Any click on the field - text, border or padding - takes the caret.
+        focus_on_click(self.entry, self.entry._entry,
+                       getattr(self.entry, "_canvas", None), box)
 
         ctk.CTkLabel(
             box,
