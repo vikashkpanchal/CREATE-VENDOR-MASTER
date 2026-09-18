@@ -36,6 +36,7 @@ from vendor_app.communication import (
     build_defective_invoice_messages,
     build_gst_mismatch_messages,
     normalise_financial_year,
+    overlong_pasted_lines,
     parse_pasted_rows,
     resolve_breakdown_rows,
 )
@@ -203,6 +204,33 @@ class _EmailFlow(ctk.CTkFrame):
     def build_options(self, parent):
         """Extra controls for this flow, if it has any. Nothing by default."""
         return None
+
+    def _rows_look_mangled(self, text, keys) -> bool:
+        """Refuse a paste whose lines hold more cells than there are columns.
+
+        Comma-separated text with unquoted Indian-format amounts - 11,80,000 -
+        cannot be told from three separate columns. Reading it blind shifts
+        every column after the first amount, which on a GST notice means
+        wrong figures against a real invoice number. So it is said, with the
+        lines named, and nothing is drafted.
+        """
+        overlong = overlong_pasted_lines(text, keys)
+        if not overlong:
+            return False
+        lines = ", ".join(str(number) for number, _count in overlong[:8])
+        if len(overlong) > 8:
+            lines += ", ..."
+        messagebox.showwarning(
+            "Columns Do Not Line Up",
+            f"{len(overlong)} pasted line(s) hold more values than there are "
+            f"columns - line(s) {lines}.\n\n"
+            "This usually means the data is comma separated and an amount such "
+            "as 11,80,000 has been read as three columns, which would put wrong "
+            "figures against a real invoice.\n\n"
+            "Copy the rows straight out of Excel instead - that pastes as "
+            "columns and is read exactly.",
+        )
+        return True
 
     def build_input(self, parent):
         """Default input: a free-text paste box. Subclasses may replace it."""
@@ -475,6 +503,9 @@ class DefectiveInvoiceFlow(_EmailFlow):
     CC_KEY = CC_DEFECTIVE_KEY
 
     def _build_messages(self, text, skip_codes):
+        if self._rows_look_mangled(text, DEFECTIVE_INVOICE_KEYS):
+            return None
+
         rows = parse_pasted_rows(text, DEFECTIVE_INVOICE_KEYS)
         if not rows:
             messagebox.showwarning("No Rows Found", "No invoice rows were recognized.")
@@ -625,6 +656,9 @@ class GstMismatchFlow(_EmailFlow):
         # Show the tidied form back, so what was typed and what goes out agree.
         if year != self.year_var.get().strip():
             self.year_var.set(year)
+
+        if self._rows_look_mangled(text, GST_MISMATCH_KEYS):
+            return None
 
         rows = parse_pasted_rows(text, GST_MISMATCH_KEYS)
         if not rows:

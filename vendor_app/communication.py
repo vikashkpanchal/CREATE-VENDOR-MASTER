@@ -10,6 +10,7 @@ Rows whose vendor has no email on file are reported back as "unresolved"
 so the UI can offer to add the address or skip that vendor.
 """
 
+import csv
 import re
 
 from vendor_app.config import DEFECTIVE_INVOICE_KEYS
@@ -24,6 +25,46 @@ from vendor_app.email_templates import (
 from vendor_app.validators import normalize, split_emails
 
 
+def split_pasted_line(line: str) -> list:
+    """One pasted line as its cells.
+
+    A tab wins: that is what Excel puts on the clipboard, and no value in
+    these extracts contains one. Without tabs the line is read as CSV rather
+    than split on every comma, so a quoted "11,80,000" stays one amount -
+    splitting blind turned a GST row's four Indian-format amounts into a
+    dozen fragments and shifted every column after them.
+    """
+    if "\t" in line:
+        return [cell.strip() for cell in line.split("\t")]
+    try:
+        cells = next(csv.reader([line]))
+    except (csv.Error, StopIteration):
+        cells = line.split(",")
+    return [cell.strip() for cell in cells]
+
+
+def overlong_pasted_lines(text: str, keys: list) -> list:
+    """Line numbers holding more cells than there are columns, with the count.
+
+    An unquoted "11,80,000" in comma-separated text cannot be told from three
+    columns, so such a line is REPORTED rather than guessed at - quietly
+    keeping the first thirteen fragments would put wrong figures on a GST
+    notice, which is the one place to be certain rather than clever.
+    """
+    over = []
+    for number, line in enumerate(_pasted_lines(text), start=1):
+        if not line.strip():
+            continue
+        cells = split_pasted_line(line)
+        if len(cells) > len(keys):
+            over.append((number, len(cells)))
+    return over
+
+
+def _pasted_lines(text: str) -> list:
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
 def parse_pasted_rows(text: str, keys: list) -> list:
     """Parse clipboard/textarea content (tab- or comma-separated) into dicts.
 
@@ -31,13 +72,11 @@ def parse_pasted_rows(text: str, keys: list) -> list:
     detected and skipped so pasting straight from a sheet with headings works.
     """
     rows = []
-    lines = [ln for ln in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")]
 
-    for line in lines:
+    for line in _pasted_lines(text):
         if not line.strip():
             continue
-        cells = line.split("\t") if "\t" in line else line.split(",")
-        cells = [c.strip() for c in cells]
+        cells = split_pasted_line(line)
         if not any(cells):
             continue
         record = {key: (cells[i] if i < len(cells) else "") for i, key in enumerate(keys)}
