@@ -781,9 +781,21 @@ A pasted first line is treated as a heading when its cells **name columns** -
 not when its vendor code fails to look like a number, which used to eat the
 first invoice of any paste where Excel had written the code as `'90001`.
 
-Recipient addresses come from the vendor master. If a vendor has no email on
-file, a dialog lists those vendors so you can enter an address (saved back to
-the vendor master and logged) or tick **Skip**.
+Recipient addresses come from the vendor master - the vendor's own email
+first, falling back to Contact Person 1 and then Contact Person 2, so a
+vendor reachable only through a contact still gets their email.
+
+**If a vendor has no address on file, nothing is drafted for them and nothing
+is lost.** A dialog lists those vendors, says how many rows each has and
+which vendor codes are not in the vendor master at all, and offers an email
+box or a **Skip** tick for each. An address typed there is written back to
+the vendor master through the normal upsert, so it is validated and lands in
+the change log; a vendor code that was not on the master is created with the
+name from the pasted rows, while a vendor already on the master keeps the
+name it has. Skipped vendors are counted in the status line rather than
+disappearing quietly. Their rows are held with them throughout, so once an
+address is supplied the letter goes out with every one of that vendor's
+invoices in it.
 
 **Each flow keeps its own CC row.** The people copied on an invoice chase are
 rarely the people copied on a breakdown or on a GST notice, so each panel

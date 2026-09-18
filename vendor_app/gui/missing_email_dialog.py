@@ -109,7 +109,16 @@ class MissingEmailDialog(ctk.CTkToplevel):
             try:
                 # Writes through the normal upsert path, so the address is
                 # validated and the change lands in the audit trail.
-                self.store.upsert({"vendor_code": code, "vendor_email": address})
+                record = {"vendor_code": code, "vendor_email": address}
+                item = entry["item"]
+                # A vendor code that is not on the master is being created
+                # here, so give it the name from the pasted rows - otherwise
+                # the master gains a vendor with an address and no name.
+                # A vendor already on the master keeps the name it has: that
+                # one is the record of truth, not a pasted spelling of it.
+                if not item.get("in_master") and normalize(item.get("vendor_name", "")):
+                    record["vendor_name"] = normalize(item["vendor_name"])
+                self.store.upsert(record)
                 saved += 1
             except ValidationError as exc:
                 problems.append(f"{code}: {exc}")
