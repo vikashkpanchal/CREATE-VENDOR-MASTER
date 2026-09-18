@@ -754,6 +754,117 @@ class ArcStore:
         )
         return record
 
+    # ------------------------------------------------- close / re-open --
+    def close_document(self, document, closure_date=None, remarks=""):
+        """Close a contract: it is finished, and stops asking to be acted on.
+
+        Closure is written on every item of the document, because a contract
+        is closed as a whole - closing one line of it would mean nothing. It
+        is this app's own mark, not SAP's, so an ME3L re-import leaves it
+        alone: a blank incoming cell never overwrites what is stored.
+
+        Returns the number of items closed, or 0 if the contract is not on
+        file. Closing one that is already closed re-stamps the date, which is
+        how a correction is made.
+        """
+        stamp = format_date(closure_date) if closure_date else format_date(date.today())
+        with self._lock:
+            items = self.items_for_document(document)
+            if not items:
+                return 0
+            for record in items:
+                record["closure_date"] = stamp
+                if remarks:
+                    record["closure_remarks"] = normalize(remarks)
+            self.arcs.save()
+        detail = f"Contract closed on {stamp} ({len(items)} item(s))"
+        if remarks:
+            detail += f" - {normalize(remarks)}"
+        self._log(normalize(document), "", "Closed", detail)
+        return len(items)
+
+    def reopen_document(self, document):
+        """Take the closure off a contract, leaving its dates as they are."""
+        with self._lock:
+            items = [r for r in self.items_for_document(document)
+                     if normalize(r.get("closure_date", ""))]
+            if not items:
+                return 0
+            for record in items:
+                record["closure_date"] = ""
+                record["closure_remarks"] = ""
+            self.arcs.save()
+        self._log(normalize(document), "", "Re-opened",
+                  f"Closure removed from {len(items)} item(s)")
+        return len(items)
+
+    def renew_document(self, document, validity_end, validity_start=None,
+                       target_value=None, remarks=""):
+        """Extend a contract to a new end date, and re-open it if it was closed.
+
+        The renewal is written to every item, because the validity belongs to
+        the contract rather than to any one line of it. A new start date and a
+        new target value are optional - a renewal often carries a fresh value,
+        and often does not.
+
+        Returns {"items", "was_closed", "from", "to"}; raises ValidationError
+        if the new end date cannot be read or is not after the current one.
+        """
+        end = parse_date(validity_end)
+        if end is None:
+            raise ValidationError(
+                ARC_LABELS["validity_end"],
+                f"'{normalize(validity_end)}' is not a date - use DD.MM.YYYY",
+            )
+        with self._lock:
+            items = self.items_for_document(document)
+            if not items:
+                raise ValidationError(
+                    "This contract", "is not on file - refresh and try again"
+                )
+            previous = format_date(items[0].get("validity_end", ""))
+            current = parse_date(previous)
+            if current is not None and end <= current:
+                raise ValidationError(
+                    ARC_LABELS["validity_end"],
+                    f"{format_date(end)} is not after the contract's current end "
+                    f"{previous} - a renewal extends it",
+                )
+            was_closed = any(normalize(r.get("closure_date", "")) for r in items)
+            for record in items:
+                record["validity_end"] = format_date(end)
+                if validity_start:
+                    record["validity_start"] = format_date(validity_start)
+                if target_value is not None and normalize(target_value):
+                    record["target_value"] = normalize(target_value)
+                # A renewed contract is live again by definition.
+                record["closure_date"] = ""
+                record["closure_remarks"] = ""
+            self.arcs.save()
+
+        detail = f"Renewed: Validity Period End '{previous}' -> '{format_date(end)}'"
+        if validity_start:
+            detail += f"; start {format_date(validity_start)}"
+        if target_value is not None and normalize(target_value):
+            detail += f"; Target Val. (Header) {normalize(target_value)}"
+        if was_closed:
+            detail += "; re-opened"
+        if remarks:
+            detail += f" - {normalize(remarks)}"
+        self._log(normalize(document), "", "Renewed", detail)
+        return {"items": len(items), "was_closed": was_closed,
+                "from": previous, "to": format_date(end)}
+
+    def is_closed(self, document) -> bool:
+        """Is this contract closed? Read off the header, like every other
+        contract-level fact."""
+        return bool(normalize(self.header_for(document).get("closure_date", "")))
+
+    def closed_documents(self) -> list:
+        """Every closed contract's number, in the store's own order."""
+        return [entry["document"] for entry in self.documents().values()
+                if normalize(entry["header"].get("closure_date", ""))]
+
     # ------------------------------------------------------------ delete --
     def delete_arc(self, row_id):
         """Remove one contract item. The last item of a document takes the

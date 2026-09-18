@@ -544,6 +544,11 @@ ARC_KEYS = [
     "release_indicator",
     "release_status",
     "po_history",
+    # Closing a contract is this app's own doing, not SAP's - these two are
+    # never in an ME3L export, so a re-import leaves them exactly as they are
+    # (a blank incoming cell never overwrites what is stored).
+    "closure_date",
+    "closure_remarks",
 ]
 
 ARC_LABELS = {
@@ -560,6 +565,8 @@ ARC_LABELS = {
     "release_indicator": "Release indicator",
     "release_status": "Release status",
     "po_history": "PO history/release documentation",
+    "closure_date": "Closed On",
+    "closure_remarks": "Closure Remarks",
 }
 
 # A row is identified by its document and its item number: one purchasing
@@ -572,6 +579,9 @@ ARC_HEADER_KEYS = [
     "plant", "purchasing_group", "purchasing_document", "document_date",
     "vendor_supplying_plant", "validity_start", "validity_end",
     "target_value", "release_indicator", "release_status",
+    # Closure belongs to the contract, not to one of its lines, so it is
+    # written on every item and read back off the header.
+    "closure_date", "closure_remarks",
 ]
 
 # Release indicator: is the contract usable yet?
@@ -641,6 +651,8 @@ ARC_WRAPPED_LABELS = {
     "release_indicator": "Release\nindicator",
     "release_status": "Release\nstatus",
     "po_history": "PO history /\nrelease documentation",
+    "closure_date": "Closed\nOn",
+    "closure_remarks": "Closure\nRemarks",
 }
 
 ARC_COLUMN_WIDTHS = {
@@ -661,6 +673,8 @@ ARC_COLUMN_WIDTHS = {
     "release_indicator": 190,
     "release_status": 180,
     "po_history": 300,
+    "closure_date": 120,
+    "closure_remarks": 240,
 }
 
 # Pre-rename columns, so a store written by an earlier build still loads.
@@ -816,7 +830,8 @@ FO_LEGACY_COLUMNS = {
 # Every date column in the two tables. They are normalised to DD.MM.YYYY on
 # the way in and rendered that way on the way out, so a validity period reads
 # the same everywhere no matter what shape the export wrote it in.
-ARC_DATE_FIELDS = ("document_date", "validity_start", "validity_end")
+ARC_DATE_FIELDS = ("document_date", "validity_start", "validity_end",
+                   "closure_date")
 FO_DATE_FIELDS = ("validity_start", "validity_end",
                   "fo_validity_start", "fo_validity_end")
 

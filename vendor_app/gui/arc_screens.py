@@ -172,7 +172,15 @@ class ArcRecordsScreen(_ArcScreenBase):
         secondary_button(parent, "Edit Row", self._edit_selected, width=110).pack(
             side="left", padx=(0, 8)
         )
-        secondary_button(parent, "+ Add Item", self._add, width=120).pack(side="left")
+        secondary_button(parent, "+ Add Item", self._add, width=120).pack(
+            side="left", padx=(0, 8)
+        )
+        secondary_button(parent, "Close ARC", self._close_selected, width=110).pack(
+            side="left", padx=(0, 8)
+        )
+        secondary_button(parent, "Renew ARC", self._renew_selected, width=110).pack(
+            side="left"
+        )
 
     def _edit_selected(self):
         record = self._selected_record()
@@ -181,6 +189,68 @@ class ArcRecordsScreen(_ArcScreenBase):
 
     def _add(self):
         self.open_dialog(None)
+
+    # -------------------------------------------------- close / renew --
+    def _selected_document(self):
+        """The purchasing document of the selected row.
+
+        Closing and renewing act on the whole contract, not on the line that
+        happens to be selected, so everything below works from this.
+        """
+        record = self._selected_record()
+        if record is None:
+            return None
+        document = str(record.get("purchasing_document", "")).strip()
+        if not document:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "No Contract Number",
+                "This row has no Purchasing Document, so there is no contract to "
+                "close or renew. Fill the number in first.",
+            )
+            return None
+        return document
+
+    def _close_selected(self):
+        """Close the selected contract - or offer to re-open one that is
+        already closed, since the same button is where anybody would look."""
+        document = self._selected_document()
+        if document is None:
+            return
+        from vendor_app.gui.arc_close_dialogs import CloseArcDialog
+        header = self.store.header_for(document)
+        if self.store.is_closed(document):
+            from tkinter import messagebox
+            closed_on = header.get("closure_date", "")
+            remarks = header.get("closure_remarks", "")
+            detail = f"Contract {document} was closed on {closed_on}."
+            if remarks:
+                detail += f"\n{remarks}"
+            if messagebox.askyesno(
+                "Contract Already Closed",
+                f"{detail}\n\nRe-open it, so it counts as live again?",
+            ):
+                count = self.store.reopen_document(document)
+                self._after_dialog()
+                messagebox.showinfo(
+                    "Contract Re-opened",
+                    f"Contract {document} is open again ({count} item(s)).",
+                )
+            return
+        CloseArcDialog(self, self.store, document, header, on_done=self._after_action)
+
+    def _renew_selected(self):
+        document = self._selected_document()
+        if document is None:
+            return
+        from vendor_app.gui.arc_close_dialogs import RenewArcDialog
+        RenewArcDialog(self, self.store, document, self.store.header_for(document),
+                       on_done=self._after_action)
+
+    def _after_action(self, message):
+        self._after_dialog()
+        from tkinter import messagebox
+        messagebox.showinfo("Done", message)
 
 
 class FoRecordsScreen(_ArcScreenBase):

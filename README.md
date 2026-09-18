@@ -450,6 +450,55 @@ Purchasing Document  (the contract - the key everything is filed against)
 - Deleting a contract's last item takes its frame orders with it; both are
   recorded in the log.
 
+### Closing and renewing a contract
+
+An expired contract is not finished with - somebody has to say so. Until
+they do, it sits in Expired ARC and in the risk lists asking to be acted on,
+and a list of a hundred contracts nobody is going to renew hides the three
+that matter.
+
+**ARC Records** carries the two buttons: **Close ARC** and **Renew ARC**.
+Select any row of a contract and press one - both act on the whole
+purchasing document, not on the line that happens to be selected, because a
+contract is closed and renewed as a whole and closing one line of it would
+mean nothing.
+
+**Close ARC** asks for the date it was closed (today, unless you change it)
+and an optional remark - why it is being closed. Then:
+
+- the contract leaves **Active ARC**, **Expired ARC**, **ARC Expiring**,
+  **ARC Without FO**, **Pending Approval**, the **value-difference** list and
+  both risk lists - every figure that asks to be acted on;
+- it is counted on its own as **Closed ARC**, with its own dashboard section
+  and its own two summary rows - the count and the value closed;
+- it still counts in **Total ARC** and **Total ARC Value**. It existed, and
+  the money was committed; closing it does not rewrite history;
+- its status reads **Closed** in the status donut, which outranks expired -
+  a closed contract is not an expiry problem;
+- **its rows do not change.** Closure is this app's own mark, not SAP's. Two
+  columns hold it, `Closed On` and `Closure Remarks`, and a re-import of the
+  ME3L export leaves them alone, because a blank incoming cell never
+  overwrites what is stored.
+
+Pressing **Close ARC** on a contract that is already closed offers to
+**re-open** it instead, with the date it was closed and the remark in the
+question - the same button is where anybody would look for it. Closing an
+already-closed contract again simply re-stamps the date, which is how a
+wrong one is corrected.
+
+**Renew ARC** extends the contract to a new Validity Period End, and takes
+an optional new start date and new target value - a renewal often carries a
+fresh value and often does not; left blank, what is there is kept. The new
+end date **must be after the current one**: a renewal extends a contract,
+and a date that does not is refused with the two dates in the message rather
+than silently shortening it. A contract that was closed is **re-opened by
+renewing it** - somebody extending a contract is plainly treating it as
+live - and the confirmation says so.
+
+All three - closed, re-opened, renewed - are written to the **Change Log**
+against the purchasing document, with the dates before and after, so the
+history of a contract's extensions can be read off one screen.
+
 ### Table 1: ARC data (ME3L export)
 
 | Column | Meaning |
@@ -467,6 +516,11 @@ Purchasing Document  (the contract - the key everything is filed against)
 | Release indicator | `R` released · `S` pending for approval |
 | Release status | `X` buyer · `XX` PV · `XXX` R2 · `XXXX` R4 · `XXXXX` R6 |
 | PO history/release documentation | Follow-on history and documentation text |
+| Closed On | Date this contract was closed in the app - blank while it is live |
+| Closure Remarks | Why it was closed |
+
+The last two are the app's own, not the export's: see **Closing and renewing
+a contract** above. Every other column comes from ME3L.
 
 The combined **Vendor/supplying plant** column is stored exactly as the export
 writes it; the code and the name are split out for the vendor master and the
@@ -524,9 +578,9 @@ frame orders behind "Total FO Value", the two contracts behind "ARC Without
 FO" - with the same row-height control and its own Excel export. A number on
 this page can always be taken apart into the rows it came from.
 
-**KPI cards** - Total ARC · Active ARC · Expired ARC · ARC Without FO ·
-Total ARC Value · Total FO · Total FO Value · ARC Expiring in 30 Days ·
-FO Expiring in 30 Days · Pending Approval (S). They reflow into as many
+**KPI cards** - Total ARC · Active ARC · Expired ARC · Closed ARC ·
+ARC Without FO · Total ARC Value · Total FO · Total FO Value ·
+ARC Expiring in 30 Days · FO Expiring in 30 Days · Pending Approval (S). They reflow into as many
 columns as the window fits, so none is ever pushed off the edge, and a
 figure's type size steps down as it gets longer so a crore-scale total is
 read rather than clipped.
@@ -537,6 +591,7 @@ read rather than clipped.
 | --- | --- |
 | ARC Expiry Analysis | status donut, release position, expiry trend (expired / 0-30 / 31-60 / 61-90 / beyond), and the contracts expiring in 30 days, soonest first |
 | FO Expiry Analysis | the same read on the frame orders - which need extending |
+| Closed ARC | contracts closed in this app - what was targeted, what was released, when it was closed and why |
 | FO Value Exhausted | frame orders whose Opening Value has fallen under 10% of their Released Value - emptiest first |
 | ARC Without FO | a contract against which not one frame order has been raised, biggest first |
 | Pending Approval | release indicator `S` - nothing can be ordered against these yet, furthest through the approval chain first |
@@ -569,9 +624,9 @@ The section carries **Opening % of Released** and **Value Used** alongside
 the three source figures, and the export's Summary sheet adds the count and
 the total value still sitting on those orders.
 
-Nineteen analyses back those sections: ARC and FO counts, values, active and
-expired counts, 30/60/90-day expiry buckets for both, ARC Without FO, the ARC
-vs FO gap, the vendor-wise comparison, and the two risk lists.
+Twenty analyses back those sections: ARC and FO counts, values, active,
+expired and closed counts, 30/60/90-day expiry buckets for both, ARC Without
+FO, the ARC vs FO gap, the vendor-wise comparison, and the two risk lists.
 
 **Export** writes one `.xlsx`: the headline analyses on a `Summary` sheet,
 then both masters rolled to their entity and every dashboard table, each on
@@ -901,7 +956,8 @@ vendor_app/
   audit.py                    ChangeLog: append-only history for both masters
   equipment.py                EquipmentStore: equipment master, lookups, de-mob
   arc.py                      ArcStore: Table 1 + Table 2, with entity roll-up
-  arc_analytics.py            the 19 ARC/FO analyses: expiry, gaps, risk, vendors
+  arc_analytics.py            the 20 ARC/FO analyses: expiry, closure, gaps,
+                               risk, vendors
   arc_value.py                ARC value calculation: input rows -> priced annexure
   workbook.py                 all four masters in one file, out and back in
   communication.py            group pasted rows into one email per vendor
@@ -937,11 +993,13 @@ vendor_app/
     arc_dashboard_tab.py           ARC & FO management dashboard
     arc_value_tab.py               ARC value calculation: input, result, export
     arc_dialogs.py                 contract-item and frame-order-item modals
+    arc_close_dialogs.py           close a contract, and renew one
     dashboard_tab.py               interactive equipment analytics
     audit_tab.py                   change log screen (serves both masters)
-    communication_tab.py           the two email flows
+    communication_tab.py           the three email flows
     edit_dialog.py                 shared add/edit record + status dialog
     cc_dialog.py                   editable, pre-filled per-flow CC address dialog
     missing_email_dialog.py        collect absent vendor emails
+    util.py                        window sizing, focus and debounce helpers
 data/                         local CSV stores, all three change logs, settings (git-ignored)
 ```

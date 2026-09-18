@@ -29,7 +29,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from vendor_app.arc import format_amount
-from vendor_app.arc_analytics import ACTIVE, EXPIRED, NO_DATE, WIDTHS, ArcAnalysis
+from vendor_app.arc_analytics import ACTIVE, CLOSED, EXPIRED, NO_DATE, WIDTHS, ArcAnalysis
 from vendor_app.config import RELEASE_INDICATORS, RELEASE_PENDING, RELEASE_RELEASED
 from vendor_app.export import export_arc_analysis_to_excel, export_report_to_excel
 from vendor_app.gui import theme
@@ -44,6 +44,9 @@ from vendor_app.gui.widgets import card, pill, primary_button, secondary_button
 STATUS_COLORS = {
     ACTIVE: theme.SUCCESS,
     EXPIRED: theme.DANGER,
+    # Closed is not a warning - it is a contract somebody has dealt with, so
+    # it reads as a settled state rather than as a problem.
+    CLOSED: theme.ACCENT,
     NO_DATE: theme.TEXT_MUTED,
 }
 
@@ -133,6 +136,7 @@ class ArcDashboardTab(ctk.CTkFrame):
         self._build_kpis(body)
         self._build_arc_expiry(body)
         self._build_fo_expiry(body)
+        self._build_report_section(body, "closed_arc")
         self._build_report_section(body, "fo_exhausted")
         self._build_report_section(body, "arc_without_fo")
         self._build_report_section(body, "pending_release")

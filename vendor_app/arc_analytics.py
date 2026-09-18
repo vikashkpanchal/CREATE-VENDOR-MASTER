@@ -40,8 +40,12 @@ from vendor_app.validators import normalize
 ACTIVE = "Active"
 EXPIRED = "Expired"
 NO_DATE = "No Validity Date"
+# A contract somebody has closed. It outranks every other state: a closed
+# contract has been dealt with, so it is not expiring, not at risk, and not
+# waiting for a frame order - which is the whole point of closing one.
+CLOSED = "Closed"
 
-STATUS_ORDER = [ACTIVE, EXPIRED, NO_DATE]
+STATUS_ORDER = [ACTIVE, EXPIRED, CLOSED, NO_DATE]
 
 # ------------------------------------------------------------- report shape --
 # One label/width map serves every report table and every exported sheet, so a
@@ -72,6 +76,8 @@ LABELS = {
     "arc_count": "ARC Count",
     "days_left": "Days to Expiry",
     "expiry_status": "Expiry Status",
+    "closure_date": "Closed On",
+    "closure_remarks": "Closure Remarks",
     "release_indicator": "Release indicator",
     "release_status": "Release status",
 }
@@ -101,6 +107,8 @@ WRAPPED_LABELS = {
     "arc_count": "ARC\nCount",
     "days_left": "Days to\nExpiry",
     "expiry_status": "Expiry\nStatus",
+    "closure_date": "Closed\nOn",
+    "closure_remarks": "Closure\nRemarks",
     "release_indicator": "Release\nindicator",
     "release_status": "Release\nstatus",
 }
@@ -116,6 +124,7 @@ WIDTHS = {
     "opening_pct": 150, "used": 130,
     "difference": 165, "frame_count": 100, "item_count": 80, "arc_count": 85,
     "days_left": 100, "expiry_status": 140,
+    "closure_date": 110, "closure_remarks": 260,
     "release_indicator": 175, "release_status": 165,
 }
 
@@ -157,7 +166,9 @@ class Report:
         return {key: source.get(key, key) for key in self.columns}
 
 
-def _expiry_status(days_left):
+def _expiry_status(days_left, closed=False):
+    if closed:
+        return CLOSED
     if days_left is None:
         return NO_DATE
     return EXPIRED if days_left < 0 else ACTIVE
@@ -217,8 +228,12 @@ class ArcAnalysis:
         text = next((normalize(r.get("short_text", "")) for r in entry["items"]
                      if normalize(r.get("short_text", ""))), "")
         indicator = normalize(header.get("release_indicator", "")).upper()
+        closed = bool(normalize(header.get("closure_date", "")))
         return {
             "document": document,
+            "closed": closed,
+            "closure_date": format_date(header.get("closure_date", "")),
+            "closure_remarks": normalize(header.get("closure_remarks", "")),
             "vendor_code": code,
             "vendor_name": name or code,
             "description": text,
@@ -232,7 +247,7 @@ class ArcAnalysis:
             "released": released,
             "difference": target - released,
             "days_left": left,
-            "expiry_status": _expiry_status(left),
+            "expiry_status": _expiry_status(left, closed),
             "indicator_code": indicator,
             "release_indicator": describe_release_indicator(indicator),
             "release_status": describe_release_status(header.get("release_status", "")),
@@ -299,11 +314,24 @@ class ArcAnalysis:
     def total_arc_value(self):
         return sum(r["target_value"] for r in self.arcs)
 
+    def live_arcs(self):
+        """Contracts still in play - every one that has not been closed.
+
+        Closing a contract is how a reader says "this one is finished". So
+        the counts that drive action - active, expired, expiring, at risk,
+        without a frame order, awaiting release - are all taken from here,
+        and a closed contract stops appearing in any of them.
+        """
+        return [r for r in self.arcs if not r["closed"]]
+
+    def closed_arcs(self):
+        return [r for r in self.arcs if r["closed"]]
+
     def active_arcs(self):
-        return [r for r in self.arcs if r["expiry_status"] == ACTIVE]
+        return [r for r in self.live_arcs() if r["expiry_status"] == ACTIVE]
 
     def expired_arcs(self):
-        return [r for r in self.arcs if r["expiry_status"] == EXPIRED]
+        return [r for r in self.live_arcs() if r["expiry_status"] == EXPIRED]
 
     def total_fo_count(self):
         return len(self.fos)
@@ -327,7 +355,7 @@ class ArcAnalysis:
         )
 
     def arcs_expiring(self, days=ACTION_WINDOW):
-        return self._expiring(self.arcs, days)
+        return self._expiring(self.live_arcs(), days)
 
     def fos_expiring(self, days=ACTION_WINDOW):
         return self._expiring(self.fos, days)
@@ -346,7 +374,7 @@ class ArcAnalysis:
         raw text is what would list a contract here that plainly has orders.
         """
         return sorted(
-            [r for r in self.arcs if r["frame_count"] == 0],
+            [r for r in self.live_arcs() if r["frame_count"] == 0],
             key=lambda r: r["target_value"], reverse=True,
         )
 
@@ -421,8 +449,13 @@ class ArcAnalysis:
         Ranked by the size of the gap either way: a large positive gap is
         contract value lying unused, a negative one means the frame orders
         have over-run the contract, and both belong at the top.
+
+        Closed contracts are left out, like every other list that asks to be
+        acted on: value left on a contract somebody has finished with is not
+        value going unused, it was given up on purpose. Closed ARC lists them
+        with their own target and released figures.
         """
-        rows = [r for r in self.arcs if r["target_value"] or r["released"]]
+        rows = [r for r in self.live_arcs() if r["target_value"] or r["released"]]
         return sorted(rows, key=lambda r: abs(r["difference"]), reverse=True)
 
     # ---------------------------------------------- 17: vendor-wise view --
@@ -479,7 +512,7 @@ class ArcAnalysis:
         Sorted by the approval level already reached, then by value, so the
         ones furthest along - and worth most - are dealt with first.
         """
-        rows = [r for r in self.arcs if r["indicator_code"] == RELEASE_PENDING]
+        rows = [r for r in self.live_arcs() if r["indicator_code"] == RELEASE_PENDING]
         return sorted(rows, key=lambda r: (-len(r["release_status"]), -r["target_value"]))
 
     def release_counts(self):
@@ -522,6 +555,7 @@ class ArcAnalysis:
             ("total_arc", "Total ARC", f"{self.total_arc_count():,}", "neutral"),
             ("active_arc", "Active ARC", f"{len(self.active_arcs()):,}", "good"),
             ("expired_arc", "Expired ARC", f"{len(self.expired_arcs()):,}", "bad"),
+            ("closed_arc", "Closed ARC", f"{len(self.closed_arcs()):,}", "neutral"),
             ("arc_without_fo", "ARC Without FO", f"{len(self.arcs_without_fo()):,}", "warn"),
             ("total_arc_value", "Total ARC Value", format_amount(self.total_arc_value()),
              "neutral"),
@@ -556,6 +590,13 @@ class ArcAnalysis:
         """
         window = ACTION_WINDOW
         return [
+            Report("closed_arc", "Closed ARC",
+                   ["document", "vendor_name", "description", "plant", "start", "end",
+                    "target_value", "released", "closure_date", "closure_remarks"],
+                   sorted(self.closed_arcs(), key=lambda r: -r["target_value"]),
+                   "Contracts closed in this app - finished, and left out of the "
+                   "expiry, risk and release figures. Re-open or renew one from "
+                   "ARC Records."),
             Report("fo_exhausted", f"FO Value Exhausted (<{FO_EXHAUSTED_PCT}% Left)",
                    ["frame", "contract_no", "vendor_name", "description", "plant",
                     "released", "actual", "opening", "opening_pct", "used",
@@ -643,6 +684,8 @@ class ArcAnalysis:
                           sorted(self.fos, key=lambda r: -r["released"]),
                           "Released Value summed within each frame order - these "
                           "are the figures the total adds up.")
+        if key == "closed_arc":
+            return self.report("closed_arc")
         if key == "arc_without_fo":
             return self.report("arc_without_fo")
         if key == "arc_expiring":
@@ -704,6 +747,9 @@ class ArcAnalysis:
              f"{len(self.fos_exhausted()):,}"),
             ("Value Left On Exhausted FOs",
              format_amount(sum(r["opening"] for r in self.fos_exhausted()))),
+            ("Closed ARC", f"{len(self.closed_arcs()):,}"),
+            ("Closed ARC Value",
+             format_amount(sum(r["target_value"] for r in self.closed_arcs()))),
             ("ARC Without FO", f"{len(self.arcs_without_fo()):,}"),
             ("FO Without a Contract", f"{len(self.fos_without_arc()):,}"),
             ("ARC vs FO Value Difference",
