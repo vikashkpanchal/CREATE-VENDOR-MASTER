@@ -762,6 +762,13 @@ invoices receives a single email listing all of them. Nothing is sent: every mes
   and the subject. Your default Outlook signature is added as it is on every
   other flow.
 
+**Copy the rows out of Excel**, which pastes as columns. Comma-separated text
+is read too, and an amount quoted as `"11,80,000"` stays one value - but an
+*unquoted* Indian-format amount cannot be told from three columns, so a line
+holding more values than there are columns is refused, with its line number,
+rather than guessed at. Reading it blind would shift every column after the
+first amount and put wrong figures against a real invoice number.
+
 Recipient addresses come from the vendor master. If a vendor has no email on
 file, a dialog lists those vendors so you can enter an address (saved back to
 the vendor master and logged) or tick **Skip**.
