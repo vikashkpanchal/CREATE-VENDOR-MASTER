@@ -769,6 +769,18 @@ holding more values than there are columns is refused, with its line number,
 rather than guessed at. Reading it blind would shift every column after the
 first amount and put wrong figures against a real invoice number.
 
+**Vendor codes are read as Excel writes them.** A code copied from a sheet
+arrives as `90001`, as `'90001` when the column was formatted as text, and as
+`90001.0` when it was numeric - all three are the same vendor and all three
+now match the master. Leading zeros are never trimmed, because `0090001` is a
+different code. A row carrying **no** vendor code cannot be addressed to
+anybody: it is reported before anything is drafted rather than dropped where
+it stands.
+
+A pasted first line is treated as a heading when its cells **name columns** -
+not when its vendor code fails to look like a number, which used to eat the
+first invoice of any paste where Excel had written the code as `'90001`.
+
 Recipient addresses come from the vendor master. If a vendor has no email on
 file, a dialog lists those vendors so you can enter an address (saved back to
 the vendor master and logged) or tick **Skip**.

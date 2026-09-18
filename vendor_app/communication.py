@@ -82,17 +82,45 @@ def parse_pasted_rows(text: str, keys: list) -> list:
         record = {key: (cells[i] if i < len(cells) else "") for i, key in enumerate(keys)}
         rows.append(record)
 
-    # Drop a header row if the first parsed row looks like column captions
-    # rather than data (i.e. its vendor code is not numeric).
-    if rows:
-        first = rows[0]
-        code = normalize(first.get("vendor_code", ""))
-        first_values = " ".join(str(v).lower() for v in first.values())
-        looks_like_header = (code and not code.isdigit()) or "vendor code" in first_values
-        if looks_like_header:
-            rows = rows[1:]
+    # Drop the first row when it names the columns rather than holding data.
+    if rows and _looks_like_header(rows[0]):
+        rows = rows[1:]
 
     return rows
+
+
+def _column_labels() -> set:
+    """Every column caption these flows know, lower-cased."""
+    global _LABEL_CACHE
+    if _LABEL_CACHE is None:
+        from vendor_app.config import (
+            BREAKDOWN_EMAIL_HEADERS, DEFECTIVE_INVOICE_LABELS, GST_MISMATCH_LABELS,
+        )
+        _LABEL_CACHE = {
+            str(label).strip().lower()
+            for source in (DEFECTIVE_INVOICE_LABELS, GST_MISMATCH_LABELS,
+                           BREAKDOWN_EMAIL_HEADERS)
+            for label in source.values()
+        }
+        _LABEL_CACHE |= {"remarks", "sr no", "s.no", "srno"}
+    return _LABEL_CACHE
+
+
+def _looks_like_header(record: dict) -> bool:
+    """Is this row the sheet's heading rather than an invoice?
+
+    Decided by how many of its cells ARE column captions. It used to be
+    decided by whether the vendor code was numeric, which quietly ate the
+    first invoice of any paste where Excel had written the code as
+    "\u0027"90001 or 90001.0 - a real row, gone, with no message.
+    """
+    values = [normalize(v).lower() for v in record.values()]
+    filled = [v for v in values if v]
+    if not filled:
+        return False
+    labels = _column_labels()
+    matches = sum(1 for value in filled if value in labels)
+    return matches >= max(2, (len(filled) + 1) // 2)
 
 
 def vendor_recipient(record: dict) -> str:
@@ -110,15 +138,45 @@ def vendor_recipient(record: dict) -> str:
     return ""
 
 
+_LABEL_CACHE = None
+_TRAILING_ZERO_RE = re.compile(r"^(\d+)\.0+$")
+
+
+def clean_vendor_code(value) -> str:
+    """A pasted vendor code with Excel's marks taken off it.
+
+    A code copied out of a spreadsheet arrives as 90001, as "\u0027"90001 when the
+    column was formatted as text, and as 90001.0 when it was numeric. All
+    three are the same vendor, and only the first used to match the master -
+    the other two were chased as if the vendor were not on file at all.
+
+    Leading zeros are left alone: a code stored as 0090001 is that code, and
+    trimming them here would hunt for a vendor that does not exist.
+    """
+    code = normalize(value).lstrip("\u0027").strip()
+    match = _TRAILING_ZERO_RE.match(code)
+    return match.group(1) if match else code
+
+
 def group_by_vendor(rows: list) -> dict:
     """Group parsed rows by vendor code, preserving first-seen order."""
     grouped = {}
     for row in rows:
-        code = normalize(row.get("vendor_code", ""))
+        code = clean_vendor_code(row.get("vendor_code", ""))
         if not code:
             continue
         grouped.setdefault(code, []).append(row)
     return grouped
+
+
+def rows_without_vendor_code(rows: list) -> list:
+    """Pasted rows carrying no vendor code.
+
+    They cannot be addressed to anybody, and they used to be dropped where
+    they stood - an invoice nobody was chased for, with nothing on screen to
+    say so. They are reported instead.
+    """
+    return [row for row in rows if not clean_vendor_code(row.get("vendor_code", ""))]
 
 
 def _vendor_name(store, code: str, rows: list) -> str:
@@ -173,7 +231,9 @@ def build_defective_invoice_messages(store, rows: list, skip_codes=None) -> dict
             }
         )
 
-    return {"messages": messages, "unresolved": unresolved, "skipped": skipped}
+    return {"messages": messages, "unresolved": unresolved,
+            "skipped": skipped,
+            "no_vendor_code": rows_without_vendor_code(rows)}
 
 
 def resolve_breakdown_rows(equipment_store, identifiers: list, remarks=None) -> dict:
@@ -363,4 +423,6 @@ def build_gst_mismatch_messages(store, rows: list, financial_year: str,
             }
         )
 
-    return {"messages": messages, "unresolved": unresolved, "skipped": skipped}
+    return {"messages": messages, "unresolved": unresolved,
+            "skipped": skipped,
+            "no_vendor_code": rows_without_vendor_code(rows)}

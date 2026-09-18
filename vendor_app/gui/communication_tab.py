@@ -299,6 +299,17 @@ class _EmailFlow(ctk.CTkFrame):
         self._finish_prepare(result)
 
     def _finish_prepare(self, result):
+        # Rows that name no vendor cannot be addressed to anybody. They used
+        # to be dropped where they stood - an invoice nobody was chased for,
+        # with nothing on screen to say so - so they are said out loud.
+        orphans = result.get("no_vendor_code") or []
+        if orphans:
+            messagebox.showwarning(
+                "Rows With No Vendor Code",
+                f"{len(orphans)} pasted row(s) have no Vendor Code, so there is "
+                "nobody to send them to and they are not included.\n\n"
+                "Add the vendor code against those rows and prepare again.",
+            )
         self.messages = result.get("messages", [])
         skipped = result.get("skipped", [])
         self._render_preview()
@@ -306,6 +317,8 @@ class _EmailFlow(ctk.CTkFrame):
         status = f"{len(self.messages)} email(s) ready - one per vendor"
         if skipped:
             status += f"  •  {len(skipped)} vendor(s) skipped"
+        if orphans:
+            status += f"  •  {len(orphans)} row(s) with no vendor code left out"
         extra = result.get("note")
         if extra:
             status += f"  •  {extra}"
