@@ -231,10 +231,8 @@ class ArcRecordsScreen(_ArcScreenBase):
                 f"{detail}\n\nRe-open it, so it counts as live again?",
             ):
                 count = self.store.reopen_document(document)
-                self._after_dialog()
-                messagebox.showinfo(
-                    "Contract Re-opened",
-                    f"Contract {document} is open again ({count} item(s)).",
+                self._after_action(
+                    f"Contract {document} is open again ({count} item(s))."
                 )
             return
         CloseArcDialog(self, self.store, document, header, on_done=self._after_action)
@@ -248,9 +246,11 @@ class ArcRecordsScreen(_ArcScreenBase):
                        on_done=self._after_action)
 
     def _after_action(self, message):
+        """Refresh, then say what happened in a toast rather than a pop-up:
+        the work is done, and a second window to dismiss is just in the way."""
         self._after_dialog()
-        from tkinter import messagebox
-        messagebox.showinfo("Done", message)
+        from vendor_app.gui.toast import notify
+        notify(self, message)
 
 
 class FoRecordsScreen(_ArcScreenBase):

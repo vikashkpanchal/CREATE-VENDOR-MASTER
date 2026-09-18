@@ -50,7 +50,7 @@ class _ContractActionDialog(ctk.CTkToplevel):
         # The fields exist now, so the window can be sized to what they
         # really need rather than to a figure written when it was designed -
         # a window a few pixels short leaves the last field unusable.
-        grow_to_fit(self)
+        grow_to_fit(self, content=getattr(self, "_content", None))
         self.bind("<Escape>", lambda e: self.destroy())
         if self._first_entry is not None:
             claim_focus(self, self._first_entry)
@@ -91,6 +91,7 @@ class _ContractActionDialog(ctk.CTkToplevel):
 
         box = card(body, fg_color=theme.BG_CARD)
         box.pack(fill="both", expand=True)
+        self._content = box
         section_label(box, "CONTRACT").pack(anchor="w", padx=18, pady=(14, 2))
         ctk.CTkLabel(
             box, text=self.contract_line(), font=theme.body_font(),
@@ -162,7 +163,7 @@ class _ContractActionDialog(ctk.CTkToplevel):
 class CloseArcDialog(_ContractActionDialog):
     TITLE = "Close Contract"
     ACTION = "Close Contract"
-    HEIGHT = 460
+    HEIGHT = 500
 
     def subtitle(self):
         return ("A closed contract is finished: it leaves the active, expiring, "
@@ -191,7 +192,7 @@ class CloseArcDialog(_ContractActionDialog):
 class RenewArcDialog(_ContractActionDialog):
     TITLE = "Renew Contract"
     ACTION = "Renew Contract"
-    HEIGHT = 560
+    HEIGHT = 640
 
     def subtitle(self):
         return ("Extend the contract to a new Validity Period End. The new date "

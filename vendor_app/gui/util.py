@@ -74,7 +74,7 @@ def fit_on_screen(window, preferred_w, preferred_h, min_w=0, min_h=0,
     return int(width), int(height)
 
 
-def grow_to_fit(window, margin_w=80, margin_h=90, y_divisor=3):
+def grow_to_fit(window, content=None, margin_w=80, margin_h=90, y_divisor=3):
     """Grow `window` to the size its contents actually ask for.
 
     fit_on_screen sizes a window from figures written when it was designed.
@@ -89,6 +89,13 @@ def grow_to_fit(window, margin_w=80, margin_h=90, y_divisor=3):
     still wins, because a window larger than it puts its own buttons out of
     reach. Call it at the end of __init__, after the fields are built.
 
+    `content` is the widget that must be shown whole - the fields, typically.
+    Pass it when they sit inside a scrollable frame: a scrollable frame asks
+    for almost no height of its own, whatever it holds, so the window has no
+    way to know from its own request that a field is being cut in half. What
+    `content` is short by is added to the window instead, and anything left
+    over after the screen has had its say still scrolls.
+
     Returns the (width, height) in force afterwards, in real screen pixels.
     """
     window.update_idletasks()
@@ -98,10 +105,15 @@ def grow_to_fit(window, margin_w=80, margin_h=90, y_divisor=3):
     # reqwidth/reqheight are what the packed contents ask for, in real
     # pixels with widget scaling already applied - so they are compared with
     # the window's real size, and only the geometry string is un-scaled.
-    width = min(max(window.winfo_width(), window.winfo_reqwidth()),
-                max(1, screen_w - margin_w))
-    height = min(max(window.winfo_height(), window.winfo_reqheight()),
-                 max(1, screen_h - margin_h))
+    wanted_w = max(window.winfo_width(), window.winfo_reqwidth())
+    wanted_h = max(window.winfo_height(), window.winfo_reqheight())
+    if content is not None and content.winfo_exists() and content.winfo_height() > 1:
+        # Only a genuine shortfall counts: a laid-out widget that already has
+        # the room it asked for adds nothing.
+        wanted_h += max(0, content.winfo_reqheight() - content.winfo_height())
+
+    width = min(wanted_w, max(1, screen_w - margin_w))
+    height = min(wanted_h, max(1, screen_h - margin_h))
     window.geometry(
         f"{int(width / scale)}x{int(height / scale)}"
         f"+{max(0, int(screen_w - width) // 2)}"
