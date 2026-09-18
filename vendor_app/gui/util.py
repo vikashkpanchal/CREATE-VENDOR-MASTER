@@ -74,6 +74,42 @@ def fit_on_screen(window, preferred_w, preferred_h, min_w=0, min_h=0,
     return int(width), int(height)
 
 
+def grow_to_fit(window, margin_w=80, margin_h=90, y_divisor=3):
+    """Grow `window` to the size its contents actually ask for.
+
+    fit_on_screen sizes a window from figures written when it was designed.
+    Those figures go stale the moment a field is added, a label wraps onto a
+    third line, or the display is at 125% - and a window an inch too short
+    does not scroll: Tk simply stops giving room to whatever is packed last,
+    which arrives on screen as a field one pixel high that cannot be clicked
+    into or typed in. That is the same failure the CC address box had.
+
+    So the window is measured once its contents exist, and grown to what they
+    need. It is never shrunk, and never grown past the display: the screen
+    still wins, because a window larger than it puts its own buttons out of
+    reach. Call it at the end of __init__, after the fields are built.
+
+    Returns the (width, height) in force afterwards, in real screen pixels.
+    """
+    window.update_idletasks()
+    scale = window_scaling(window) or 1.0
+    screen_w, screen_h = window.winfo_screenwidth(), window.winfo_screenheight()
+
+    # reqwidth/reqheight are what the packed contents ask for, in real
+    # pixels with widget scaling already applied - so they are compared with
+    # the window's real size, and only the geometry string is un-scaled.
+    width = min(max(window.winfo_width(), window.winfo_reqwidth()),
+                max(1, screen_w - margin_w))
+    height = min(max(window.winfo_height(), window.winfo_reqheight()),
+                 max(1, screen_h - margin_h))
+    window.geometry(
+        f"{int(width / scale)}x{int(height / scale)}"
+        f"+{max(0, int(screen_w - width) // 2)}"
+        f"+{max(0, int(screen_h - height) // y_divisor)}"
+    )
+    return int(width), int(height)
+
+
 def claim_focus(window, widget=None, tries: int = 8, delay_ms: int = 60):
     """Put the caret in `widget` and keep it there while the window settles.
 

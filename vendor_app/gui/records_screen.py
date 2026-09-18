@@ -127,25 +127,38 @@ class RecordsScreen(ctk.CTkFrame):
             actions, f"{self.EXPORT_PREFIX} (.xlsx)", self.export_all, width=150
         ).pack(side="left")
 
+        # Search on the left, buttons on the right, in two grid columns: the
+        # buttons keep theirs and the search box gives way. Packing them side
+        # by side let a fixed-width search box claim the room first, and at
+        # 125% or 150% display scaling the last buttons on the right were
+        # squeezed to a single pixel - drawn, but invisible and unclickable.
         toolbar = ctk.CTkFrame(self, fg_color="transparent")
         toolbar.pack(fill="x", padx=20, pady=(0, 8))
+        toolbar.grid_columnconfigure(0, weight=1)
+        toolbar.grid_columnconfigure(1, weight=0)
+
+        search_block = ctk.CTkFrame(toolbar, fg_color="transparent")
+        search_block.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(
-            toolbar, text="Search:", font=theme.small_font(), text_color=theme.TEXT_SECONDARY
+            search_block, text="Search:", font=theme.small_font(),
+            text_color=theme.TEXT_SECONDARY,
         ).pack(side="left", padx=(0, 8))
         self.search_var = ctk.StringVar()
         self.search_var.trace_add(
             "write", lambda *a: debounce(self, "_search_after", 200, self.refresh)
         )
+        # Elastic: wide on a wide screen, and able to give room back on a
+        # narrow one rather than pushing the buttons off the edge.
         ctk.CTkEntry(
-            toolbar, textvariable=self.search_var, width=300, height=32,
+            search_block, textvariable=self.search_var, width=200, height=32,
             placeholder_text="Filter records...",
             fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
-        ).pack(side="left")
-        self.count_pill = pill(toolbar, "0 records")
+        ).pack(side="left", fill="x", expand=True)
+        self.count_pill = pill(search_block, "0 records")
         self.count_pill.pack(side="left", padx=12)
 
         right_actions = ctk.CTkFrame(toolbar, fg_color="transparent")
-        right_actions.pack(side="right")
+        right_actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
         danger_button(right_actions, "Delete Selected", self.delete_selected, width=150).pack(
             side="left", padx=(8, 0)
         )
