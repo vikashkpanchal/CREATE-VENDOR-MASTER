@@ -24,13 +24,18 @@ from vendor_app.config import (
     CC_BREAKDOWN_KEY,
     CC_DEFECTIVE_KEY,
     CC_FLOW_LABELS,
+    CC_GST_KEY,
     DEFECTIVE_INVOICE_KEYS,
+    GST_MISMATCH_KEYS,
     OUTLOOK_BREAKDOWN_FOLDER,
     OUTLOOK_DEFECTIVE_FOLDER,
+    OUTLOOK_GST_FOLDER,
 )
 from vendor_app.communication import (
     build_breakdown_messages,
     build_defective_invoice_messages,
+    build_gst_mismatch_messages,
+    normalise_financial_year,
     parse_pasted_rows,
     resolve_breakdown_rows,
 )
@@ -41,6 +46,7 @@ from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.missing_email_dialog import MissingEmailDialog
 from vendor_app.gui.style import build_table, insert_row
 from vendor_app.gui.toast import notify
+from vendor_app.gui.util import debounce, focus_on_click
 from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label, wrap_children
 
 PREVIEW_COLUMNS = ["vendor_code", "vendor_name", "rows", "to"]
@@ -54,10 +60,11 @@ PREVIEW_WIDTHS = {"vendor_code": 110, "vendor_name": 250, "rows": 100, "to": 420
 
 
 class _EmailFlow(ctk.CTkFrame):
-    """Shared UI for both communication flows.
+    """Shared UI for every communication flow.
 
     Subclasses supply the input hint, how to turn pasted text into messages,
-    and which Outlook folder the drafts belong in.
+    which Outlook folder the drafts belong in, and any control of their own
+    (see build_options - the GST chase needs a financial year).
     """
 
     INPUT_TITLE = "PASTE DATA"
@@ -106,7 +113,7 @@ class _EmailFlow(ctk.CTkFrame):
 
         right = ctk.CTkFrame(split, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
-        right.grid_rowconfigure(4, weight=1)
+        right.grid_rowconfigure(5, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
         # This row is laid out with grid, NOT pack. With pack, a long status
@@ -169,20 +176,33 @@ class _EmailFlow(ctk.CTkFrame):
         self.clear_attach_button.pack(side="left", padx=(8, 0))
         self._refresh_attach_pill()
 
+        # A flow may need one control of its own - the GST chase needs the
+        # financial year it is being sent for. It gets its own row, so it can
+        # never squeeze the CC or attachment controls.
+        options = ctk.CTkFrame(right, fg_color="transparent")
+        options.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        self.build_options(options)
+        if not options.winfo_children():
+            options.grid_remove()
+
         # The status line gets a row to itself, so however long the message
         # runs it can never squeeze the buttons or the CC controls.
         self.status_pill = pill(
             right, self.EMPTY_HINT, fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY
         )
-        self.status_pill.grid(row=3, column=0, sticky="w", pady=(0, 8))
+        self.status_pill.grid(row=4, column=0, sticky="w", pady=(0, 8))
 
         wrap = card(right, fg_color=theme.BG_CARD)
-        wrap.grid(row=4, column=0, sticky="nsew")
+        wrap.grid(row=5, column=0, sticky="nsew")
         wrap.grid_rowconfigure(0, weight=1)
         wrap.grid_columnconfigure(0, weight=1)
         outer, self.tree = build_table(wrap, PREVIEW_COLUMNS, PREVIEW_LABELS, PREVIEW_WIDTHS)
         outer.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         self.tree.bind("<Double-1>", lambda e: self.preview_selected())
+
+    def build_options(self, parent):
+        """Extra controls for this flow, if it has any. Nothing by default."""
+        return None
 
     def build_input(self, parent):
         """Default input: a free-text paste box. Subclasses may replace it."""
@@ -538,8 +558,88 @@ class EquipmentBreakdownFlow(_EmailFlow):
         return result
 
 
+class GstMismatchFlow(_EmailFlow):
+    """GST non-compliance chase: one letter per vendor, for one financial year.
+
+    The year is a field rather than a constant because these go out for a
+    year that has already closed, and the same screen is used again next
+    year. It is remembered between runs - re-typing it every time is how the
+    wrong year ends up in a letter - and it is written into both the subject
+    and the opening paragraph.
+    """
+
+    INPUT_TITLE = "GST MISMATCH ROWS"
+    INPUT_HINT = (
+        "Paste from Excel, one invoice per line, columns in this order:\n"
+        "Vendor Code, Vendor Name, GSTIN of Reliance, Vendor GSTIN, "
+        "Purchasing Document, Invoice Number, Invoice Date, Invoice Value, "
+        "Taxable amount, Total tax amount, Scroll Number, Scroll Amount, "
+        "Nature of Mismatch\n\n"
+        "A header row is detected and skipped automatically. Every invoice "
+        "for a vendor goes into that vendor's single email."
+    )
+    FOLDER = OUTLOOK_GST_FOLDER
+    CC_KEY = CC_GST_KEY
+    INPUT_WIDTH = 400
+
+    def build_options(self, parent):
+        """The financial year this run is for."""
+        ctk.CTkLabel(
+            parent, text="Financial Year:", font=theme.small_font(),
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 8))
+
+        self.year_var = ctk.StringVar(value=self.settings.financial_year())
+        entry = ctk.CTkEntry(
+            parent, textvariable=self.year_var, width=130, height=30,
+            placeholder_text="2025-26",
+            fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
+            font=theme.body_font(),
+        )
+        entry.pack(side="left")
+        focus_on_click(entry, entry._entry, getattr(entry, "_canvas", None))
+        # Remembered as it is typed, so the next run opens on the same year.
+        self.year_var.trace_add(
+            "write", lambda *a: debounce(self, "_gst_year_after", 400, self._save_year)
+        )
+        ctk.CTkLabel(
+            parent,
+            text="written into every subject line and the opening paragraph",
+            font=theme.font(10), text_color=theme.TEXT_MUTED,
+        ).pack(side="left", padx=(10, 0))
+        return entry
+
+    def _save_year(self):
+        self.settings.set_financial_year(self.year_var.get())
+
+    def _build_messages(self, text, skip_codes):
+        year = normalise_financial_year(self.year_var.get())
+        if not year:
+            messagebox.showwarning(
+                "Financial Year Missing",
+                "Enter the financial year this chase is for - for example "
+                "2025-26.\n\nIt goes into every subject line and into the "
+                "opening paragraph of every letter.",
+            )
+            return None
+        # Show the tidied form back, so what was typed and what goes out agree.
+        if year != self.year_var.get().strip():
+            self.year_var.set(year)
+
+        rows = parse_pasted_rows(text, GST_MISMATCH_KEYS)
+        if not rows:
+            messagebox.showwarning("No Rows Found", "No GST mismatch rows were recognized.")
+            return None
+
+        result = build_gst_mismatch_messages(
+            self.store, rows, year, skip_codes=skip_codes
+        )
+        result["note"] = f"{len(rows)} invoice row(s) - FY {year}"
+        return result
+
+
 class CommunicationTab(ctk.CTkFrame):
-    """Host tab: header (with the shared CC setting) plus the two flows."""
+    """Host tab: the header, plus one screen per communication flow."""
 
     def __init__(self, master, store, equipment_store, settings, on_data_changed=None):
         super().__init__(master, fg_color=theme.BG_SURFACE)
@@ -586,6 +686,7 @@ class CommunicationTab(ctk.CTkFrame):
 
         tab_invoice = self.subtabs.add("Defective Invoice Communication")
         tab_breakdown = self.subtabs.add("Equipment Breakdown Communication")
+        tab_gst = self.subtabs.add("GST Mismatch Communication")
 
         self.invoice_flow = DefectiveInvoiceFlow(
             tab_invoice, self.store, self.settings, on_data_changed=self.on_data_changed
@@ -597,6 +698,11 @@ class CommunicationTab(ctk.CTkFrame):
             on_data_changed=self.on_data_changed,
         )
         self.breakdown_flow.pack(fill="both", expand=True)
+
+        self.gst_flow = GstMismatchFlow(
+            tab_gst, self.store, self.settings, on_data_changed=self.on_data_changed
+        )
+        self.gst_flow.pack(fill="both", expand=True)
 
     def refresh(self):
         """Keep both flows' CC pills in step after a change made elsewhere."""

@@ -716,8 +716,8 @@ machine closed on the same date, not two events.)
 ## Communication
 
 Drafts vendor emails from pasted data. **One email per vendor** - a vendor
-with five defective invoices or three broken machines receives a single email
-listing all of them. Nothing is sent: every message is saved as an Outlook
+with five defective invoices, three broken machines or eleven mismatched GST
+invoices receives a single email listing all of them. Nothing is sent: every message is saved as an Outlook
 **draft** in its own sub-folder for review.
 
 - **Defective Invoice** - paste Vendor Code, Vendor Name, PO Number, Scroll
@@ -738,14 +738,37 @@ listing all of them. Nothing is sent: every message is saved as an Outlook
   identifiers on the clipboard, ready to paste back once the machines are on
   the master.
 
+- **GST Mismatch** - the GST non-compliance chase. Paste Vendor Code, Vendor
+  Name, GSTIN of Reliance, Vendor GSTIN, Purchasing Document, Invoice Number,
+  Invoice Date, Invoice Value, Taxable amount, Total tax amount, Scroll
+  Number, Scroll Amount, Nature of Mismatch. Drafts go to the Outlook folder
+  **"GST mismatch"**.
+
+  The screen carries a **Financial Year** field - type `2025-26`, `2026-27`,
+  whatever the chase is for. It is written into every subject line and into
+  the opening paragraph, and it is remembered between runs, because these go
+  out for a year that has already closed and re-typing it each time is how
+  the wrong year ends up in a letter. `2025-2026`, `2025/26` and `25-26` are
+  all understood and tidied to `2025-26`; anything else is left as typed. The
+  run stops if the field is empty.
+
+  The subject is `Non Compliance of GST : <year> || <Vendor Name (Code)>`. The
+  letter opens `To,` with the vendor in **bold** beneath it, states the year,
+  quotes the contract's input-tax-credit clause, and tabulates that vendor's
+  invoices under GSTIN of Reliance, Vendor GSTIN as per GSTN, Purchasing
+  Document, Invoice Number, Invoice Date, Invoice Value, Taxable amount, Total
+  tax amount, Scroll Number, Scroll Amount and Nature of Mismatch. Vendor Code
+  and Name are not repeated in the table - they are already in the salutation
+  and the subject. Your default Outlook signature is added as it is on every
+  other flow.
+
 Recipient addresses come from the vendor master. If a vendor has no email on
 file, a dialog lists those vendors so you can enter an address (saved back to
 the vendor master and logged) or tick **Skip**.
 
 **Each flow keeps its own CC row.** The people copied on an invoice chase are
-rarely the people copied on a breakdown, so the Defective Invoice and
-Equipment Breakdown panels each carry their own CC address, shown and edited
-on that panel. Each is asked for once, on first use of that flow, and reused
+rarely the people copied on a breakdown or on a GST notice, so each panel
+carries its own CC address, shown and edited on that panel. Each is asked for once, on first use of that flow, and reused
 from then on; changing one leaves the other untouched. Change either via its
 "Change CC" button or by clicking its CC pill: the dialog opens pre-filled so
 you can edit it in place and has a separate "Clear CC". An address saved by an

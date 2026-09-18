@@ -15,6 +15,8 @@ from vendor_app.config import (
     BREAKDOWN_EMAIL_HEADERS,
     DEFECTIVE_INVOICE_EMAIL_COLUMNS,
     DEFECTIVE_INVOICE_LABELS,
+    GST_MISMATCH_EMAIL_COLUMNS,
+    GST_MISMATCH_EMAIL_HEADERS,
 )
 
 FONT_STACK = "Calibri, Arial, sans-serif"
@@ -164,5 +166,62 @@ def breakdown_body(vendor_name: str, vendor_code: str, equipment: list) -> str:
             "restoring date via return email."
         )
         + build_table(headers, rows)
+        + "</div>"
+    )
+
+
+# ------------------------------------------------------- GST mismatch --
+def gst_mismatch_subject(financial_year: str, vendor_name: str, vendor_code: str) -> str:
+    return (
+        f"Non Compliance of GST : {(financial_year or '').strip()} || "
+        f"{vendor_display(vendor_name, vendor_code)}"
+    )
+
+
+def gst_mismatch_body(financial_year: str, vendor_name: str, vendor_code: str,
+                      rows: list) -> str:
+    """The GST non-compliance letter for one vendor.
+
+    Every mismatched invoice for that vendor goes into the single table, so
+    each vendor receives exactly one email however many invoices they have.
+    The wording is fixed - it quotes the contract - and only the financial
+    year, the vendor and the table change between letters.
+    """
+    year = (financial_year or "").strip()
+    headers = [GST_MISMATCH_EMAIL_HEADERS[k] for k in GST_MISMATCH_EMAIL_COLUMNS]
+    table_rows = [
+        [row.get(key, "") for key in GST_MISMATCH_EMAIL_COLUMNS] for row in rows
+    ]
+
+    # "To," on its own line, then the vendor in bold beneath it.
+    salutation = (
+        f'<p style="{BODY_STYLE} margin:0 0 10pt 0;">To,<br>'
+        f"<b>M/s. {escape(vendor_display(vendor_name, vendor_code))}</b></p>"
+    )
+
+    return (
+        f'<div style="{BODY_STYLE}">'
+        + salutation
+        + _para("Dear Business Partner,")
+        + _para(
+            f"This is regarding GST non-compliance for invoices of FY {escape(year)} "
+            "submitted to Company but either not uploaded or not correctly uploaded "
+            "on GSTN Portal."
+        )
+        + _para(
+            "As per our record, GST Non-Compliant Invoices are tabulated below. You are "
+            "requested to verify at your end and advised to upload correct Invoices on "
+            "GSTN Portal and file GSTR1 &amp; GSTR 3B within stipulated timeframe decided "
+            "by GST authority. This is mandatory requirement for timely release of GST "
+            "amount."
+        )
+        + _para(
+            "Please note that it is mentioned in terms and conditions of Contract that "
+            "\u201cif Company denied input tax credit on account of an error/omission on "
+            "Contractor part to upload the invoice details on GSTN, then Company shall be "
+            "entitled to recover the input tax credit amount along with interest and "
+            "penalty from Contractor\u201d."
+        )
+        + build_table(headers, table_rows)
         + "</div>"
     )

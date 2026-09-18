@@ -452,6 +452,62 @@ BREAKDOWN_EMAIL_HEADERS = {
 # Outlook draft folders (created under the default account's Inbox if absent).
 OUTLOOK_DEFECTIVE_FOLDER = "Defective Invoice"
 OUTLOOK_BREAKDOWN_FOLDER = "Equipment Breakdown"
+OUTLOOK_GST_FOLDER = "GST mismatch"
+
+# ---------------------------------------------------- GST mismatch flow --
+# The columns of the GST non-compliance extract, in the order it is pasted.
+GST_MISMATCH_KEYS = [
+    "vendor_code",
+    "vendor_name",
+    "gstin_reliance",
+    "vendor_gstin",
+    "purchasing_document",
+    "invoice_number",
+    "invoice_date",
+    "invoice_value",
+    "taxable_amount",
+    "total_tax_amount",
+    "scroll_number",
+    "scroll_amount",
+    "nature_of_mismatch",
+]
+
+GST_MISMATCH_LABELS = {
+    "vendor_code": "Vendor Code",
+    "vendor_name": "Vendor Name",
+    "gstin_reliance": "GSTIN of Reliance",
+    "vendor_gstin": "Vendor GSTIN",
+    "purchasing_document": "Purchasing Document",
+    "invoice_number": "Invoice Number",
+    "invoice_date": "Invoice Date",
+    "invoice_value": "Invoice Value",
+    "taxable_amount": "Taxable amount",
+    "total_tax_amount": "Total tax amount",
+    "scroll_number": "Scroll Number",
+    "scroll_amount": "Scroll Amount",
+    "nature_of_mismatch": "Nature of Mismatch",
+}
+
+# The email's own table. Vendor Code and Vendor Name are not in it: the
+# email goes to one vendor, and both are already in the salutation and the
+# subject line. Vendor GSTIN is headed as the vendor sees it on the portal.
+GST_MISMATCH_EMAIL_COLUMNS = [
+    "gstin_reliance",
+    "vendor_gstin",
+    "purchasing_document",
+    "invoice_number",
+    "invoice_date",
+    "invoice_value",
+    "taxable_amount",
+    "total_tax_amount",
+    "scroll_number",
+    "scroll_amount",
+    "nature_of_mismatch",
+]
+
+GST_MISMATCH_EMAIL_HEADERS = dict(
+    GST_MISMATCH_LABELS, vendor_gstin="Vendor GSTIN as per GSTN"
+)
 
 # ======================================================= ARC & FO master ==
 # An ARC (Annual Rate Contract) is the master agreement and the key every
@@ -810,11 +866,33 @@ ARC_AUDIT_COLUMN_WIDTHS = {
 # defective-invoice chase are rarely the people copied on a breakdown.
 CC_DEFECTIVE_KEY = "cc_email_defective"
 CC_BREAKDOWN_KEY = "cc_email_breakdown"
+CC_GST_KEY = "cc_email_gst"
 
 CC_FLOW_LABELS = {
     CC_DEFECTIVE_KEY: "Defective Invoice CC",
     CC_BREAKDOWN_KEY: "Equipment Breakdown CC",
+    CC_GST_KEY: "GST Mismatch CC",
 }
+
+# The financial year the GST flow writes into every subject and body. Typed
+# by the user and remembered, because a chase covers one year at a time and
+# re-typing it on every run is how the wrong year ends up in a letter.
+FINANCIAL_YEAR_KEY = "gst_financial_year"
+
+
+def current_financial_year(today=None) -> str:
+    """The Indian financial year containing `today`, as "2026-27".
+
+    April to March: 18 September 2026 falls in 2026-27, 3 March 2027 still
+    falls in 2026-27. Only ever a starting suggestion - the year is an
+    editable field, because these chases are usually sent for a year that
+    has already closed.
+    """
+    from datetime import date
+
+    day = today or date.today()
+    start = day.year if day.month >= 4 else day.year - 1
+    return f"{start}-{str(start + 1)[-2:]}"
 
 
 # =================================================== ARC value calculation ==

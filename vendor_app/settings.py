@@ -10,7 +10,10 @@ import json
 import os
 import threading
 
-from vendor_app.config import CC_BREAKDOWN_KEY, CC_DEFECTIVE_KEY, SETTINGS_FILE
+from vendor_app.config import (
+    CC_BREAKDOWN_KEY, CC_DEFECTIVE_KEY, CC_GST_KEY, FINANCIAL_YEAR_KEY,
+    SETTINGS_FILE, current_financial_year,
+)
 
 DEFAULTS = {
     # Legacy single CC, kept so an existing settings file still opens; it
@@ -21,9 +24,14 @@ DEFAULTS = {
     f"{CC_DEFECTIVE_KEY}_prompted": False,
     CC_BREAKDOWN_KEY: "",
     f"{CC_BREAKDOWN_KEY}_prompted": False,
+    CC_GST_KEY: "",
+    f"{CC_GST_KEY}_prompted": False,
+    # Blank until the user types one; the GST screen opens on the current
+    # financial year when it has never been set.
+    FINANCIAL_YEAR_KEY: "",
 }
 
-CC_KEYS = (CC_DEFECTIVE_KEY, CC_BREAKDOWN_KEY)
+CC_KEYS = (CC_DEFECTIVE_KEY, CC_BREAKDOWN_KEY, CC_GST_KEY)
 
 
 class AppSettings:
@@ -89,6 +97,21 @@ class AppSettings:
         with self._lock:
             self._data[key] = (value or "").strip()
             self._data[f"{key}_prompted"] = True
+            self.save()
+
+    # ------------------------------------------------- financial year --
+    def financial_year(self) -> str:
+        """The year the GST chase is for - what was last typed, or this one.
+
+        A chase is usually sent for a year that has already closed, so the
+        stored answer wins; the current year is only the starting point the
+        very first time the screen is opened.
+        """
+        return (self._data.get(FINANCIAL_YEAR_KEY) or "").strip() or current_financial_year()
+
+    def set_financial_year(self, value: str):
+        with self._lock:
+            self._data[FINANCIAL_YEAR_KEY] = (value or "").strip()
             self.save()
 
     def cc_prompted_for(self, key: str) -> bool:

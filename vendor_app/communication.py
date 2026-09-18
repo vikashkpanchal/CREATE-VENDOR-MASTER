@@ -1,13 +1,16 @@
 """Turn pasted rows into one outgoing email per vendor.
 
-Both communication flows share the same shape: the user pastes rows, the
-rows are grouped by vendor (so a vendor with five defective invoices or
-three broken machines still receives exactly ONE email), and each group's
-recipient address is resolved from the vendor master.
+Every communication flow shares the same shape: the user pastes rows, the
+rows are grouped by vendor (so a vendor with five defective invoices, three
+broken machines or eleven mismatched GST invoices still receives exactly
+ONE email), and each group's recipient address is resolved from the vendor
+master.
 
 Rows whose vendor has no email on file are reported back as "unresolved"
 so the UI can offer to add the address or skip that vendor.
 """
+
+import re
 
 from vendor_app.config import DEFECTIVE_INVOICE_KEYS
 from vendor_app.email_templates import (
@@ -15,6 +18,8 @@ from vendor_app.email_templates import (
     breakdown_subject,
     defective_invoice_body,
     defective_invoice_subject,
+    gst_mismatch_body,
+    gst_mismatch_subject,
 )
 from vendor_app.validators import normalize, split_emails
 
@@ -248,3 +253,75 @@ def parse_identifiers(text: str) -> list:
             seen.add(value.lower())
             out.append(value)
     return out
+
+
+def normalise_financial_year(text) -> str:
+    """Tidy a typed financial year into "2025-26", leaving oddities alone.
+
+    "2025-2026", "2025/26" and "25-26" all mean the same year and are all
+    typed; they become "2025-26". Anything that is not recognisably a pair of
+    years is passed through exactly as written, because the field is there to
+    be typed into and a chase may legitimately be headed something else.
+    """
+    raw = normalize(text)
+    if not raw:
+        return ""
+    match = re.match(r"^\D*(\d{2,4})\s*[-/\u2013]\s*(\d{2,4})\D*$", raw)
+    if not match:
+        return raw
+    start, end = match.group(1), match.group(2)
+    if len(start) == 2:
+        start = f"20{start}"
+    if len(end) == 4:
+        end = end[-2:]
+    elif len(end) == 1:
+        end = end.zfill(2)
+    return f"{start}-{end}"
+
+
+def build_gst_mismatch_messages(store, rows: list, financial_year: str,
+                                skip_codes=None) -> dict:
+    """One GST non-compliance email per vendor.
+
+    Same shape as the other two flows - {"messages", "unresolved", "skipped"} -
+    so the screen, the missing-address dialog and the draft writer treat it
+    identically. A vendor with no email on file lands in `unresolved` and is
+    asked for rather than silently dropped.
+    """
+    skip_codes = {normalize(c) for c in (skip_codes or [])}
+    year = normalise_financial_year(financial_year)
+    grouped = group_by_vendor(rows)
+
+    messages, unresolved, skipped = [], [], []
+    for code, vendor_rows in grouped.items():
+        name = _vendor_name(store, code, vendor_rows)
+        if code in skip_codes:
+            skipped.append({"vendor_code": code, "vendor_name": name, "rows": vendor_rows})
+            continue
+
+        record = store.get(code) if store else None
+        to_addresses = vendor_recipient(record)
+        if not to_addresses:
+            unresolved.append(
+                {
+                    "vendor_code": code,
+                    "vendor_name": name,
+                    "rows": vendor_rows,
+                    "in_master": record is not None,
+                }
+            )
+            continue
+
+        messages.append(
+            {
+                "vendor_code": code,
+                "vendor_name": name,
+                "to": to_addresses,
+                "subject": gst_mismatch_subject(year, name, code),
+                "body_html": gst_mismatch_body(year, name, code, vendor_rows),
+                "row_count": len(vendor_rows),
+                "label": f"{name} ({code})",
+            }
+        )
+
+    return {"messages": messages, "unresolved": unresolved, "skipped": skipped}
