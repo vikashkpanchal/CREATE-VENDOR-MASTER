@@ -1,6 +1,6 @@
 """ARC value calculation: three input columns priced into a contract annexure.
 
-You give it, per machine: **Technical ID**, the **Extension Date** the order
+You give it, per machine: **Technical ID**, the **Extended Validity Date** the order
 is being revised up to, and the **Working Shift** (12 or 24). Everything
 else is looked up:
 
@@ -174,14 +174,14 @@ class ArcValueCalculator:
                 continue
             if parse_date(revised) is None:
                 problems.append(Problem(technical_id,
-                                        f"Extension Date '{revised}' is not a date"))
+                                        f"Extended Validity Date '{revised}' is not a date"))
                 continue
 
             months = month_span(existing, revised)
             if months <= 0:
                 problems.append(Problem(
                     technical_id,
-                    f"Extension Date {format_date(revised)} is not after the validity "
+                    f"Extended Validity Date {format_date(revised)} is not after the validity "
                     f"end {format_date(existing)} - nothing to price",
                 ))
                 continue

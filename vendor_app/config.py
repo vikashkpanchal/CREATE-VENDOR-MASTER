@@ -912,7 +912,7 @@ def current_financial_year(today=None) -> str:
 
 # =================================================== ARC value calculation ==
 # Three columns in, one priced annexure out. The input names a machine and
-# how long its order is being extended; everything else is looked up:
+# the Extended Validity Date its order is being extended to; everything else is looked up:
 #
 #   Technical ID  -> equipment master : ARC No, MCM/shift + OT codes, their
 #                                       descriptions and rates, validity end
@@ -923,14 +923,14 @@ ARC_VALUE_INPUT_KEYS = ["technical_id", "extension_date", "working_shift"]
 
 ARC_VALUE_INPUT_LABELS = {
     "technical_id": "Technical ID",
-    "extension_date": "Extension Date",
+    "extension_date": "Extended Validity Date",
     "working_shift": "Working Shift",
 }
 
 ARC_VALUE_INPUT_WRAPPED_LABELS = {
     "sr_no": "Sr.\nNo.",
     "technical_id": "Technical\nID",
-    "extension_date": "Extension\nDate",
+    "extension_date": "Extended\nValidity Date",
     "working_shift": "Working\nShift",
 }
 

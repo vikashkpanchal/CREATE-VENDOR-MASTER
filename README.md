@@ -654,8 +654,19 @@ per machine:
 | Input | |
 | --- | --- |
 | Technical ID | the machine |
-| Extension Date | what the order is being revised up to |
+| Extended Validity Date | what the order is being revised up to |
 | Working Shift | `12` or `24` |
+
+The input grid holds **1,000 rows** - paste them straight out of Excel, or
+import a sheet. The grid draws its first rows at once and the rest in the
+background, so the tab opens without a pause; a paste or import further
+down builds the rows it needs on the spot. A file or a paste with more than
+1,000 rows is **never cut short in silence**: the first 1,000 are loaded and
+you are told how many were left over.
+
+An imported sheet's header may read `Extended Validity Date` (or the older
+`Extension Date`, `Revised Date`, `Revised Order Calculation upto`) - all
+are recognised.
 
 Everything else is looked up:
 
@@ -671,7 +682,7 @@ Vendor Code  -> vendor master      vendor type
 Two dates drive the whole calculation:
 
 - **Existing Order Calculation upto** = the equipment's Validity End Date
-- **Revised Order Calculation upto** = the Extension Date you gave
+- **Revised Order Calculation upto** = the Extended Validity Date you gave
 
 and the **months between them are the MCM quantity** — counted on the
 calendar, so 28.02.2026 to 31.12.2026 is 10 months.
@@ -703,7 +714,7 @@ the source workbook.
 
 Anything that cannot be priced is listed under **NOT PRICED** rather than
 dropped — a Technical ID not in the equipment master, a shift that is not
-12 or 24, an unreadable Extension Date, an extension that is not after the
+12 or 24, an unreadable Extended Validity Date, an extension that is not after the
 validity end, a machine with no ARC No, or an ARC that is not in the ARC & FO
 master (that one still prices, using the equipment record's own vendor and
 plant, and says so).

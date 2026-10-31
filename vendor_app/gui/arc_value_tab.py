@@ -2,7 +2,7 @@
 
 The screen is the workflow, in order down the page:
 
-    1. Input      paste Technical ID, Extension Date and Working Shift
+    1. Input      paste Technical ID, Extended Validity Date and Working Shift
                   straight out of Excel, or import a sheet of them
     2. Calculate  every other column is looked up - equipment master for
                   the codes, rates and validity end; ARC & FO master for
@@ -41,7 +41,8 @@ from vendor_app.gui.widgets import (
     card, danger_button, pill, primary_button, secondary_button, wrap_children,
 )
 
-INPUT_ROWS = 200
+# The input grid holds this many rows; a file import takes the same number.
+INPUT_ROWS = 1000
 
 # The headers a sheet of input rows might carry, beyond our own labels.
 INPUT_ALIASES = {
@@ -49,7 +50,10 @@ INPUT_ALIASES = {
     "tech id": "technical_id",
     "technical no": "technical_id",
     "equipment technical id": "technical_id",
+    "extended validity date": "extension_date",
+    "extended validity": "extension_date",
     "extension date": "extension_date",
+    "extended date": "extension_date",
     "revised order calculation upto": "extension_date",
     "revised date": "extension_date",
     "working shift": "working_shift",
@@ -80,7 +84,7 @@ class ArcValueTab(ctk.CTkFrame):
         ).pack(anchor="w")
         ctk.CTkLabel(
             left,
-            text="Give it a Technical ID, an Extension Date and a Working Shift. "
+            text="Give it a Technical ID, an Extended Validity Date and a Working Shift. "
                  "Everything else - ARC No, service codes, descriptions, rates, the "
                  "validity end, the vendor and the plant - is looked up from the "
                  "masters.",
@@ -114,7 +118,7 @@ class ArcValueTab(ctk.CTkFrame):
         ctk.CTkLabel(
             box,
             text=f"Paste all three columns straight out of Excel (Ctrl+V anywhere in "
-                 f"the grid). Working Shift is "
+                 f"the grid) - up to {INPUT_ROWS:,} rows. Working Shift is "
                  f"{' or '.join(WORKING_SHIFT_VALUES)} - it decides the overtime hours "
                  f"a month carries "
                  f"({OT_HOURS_PER_DAY['12']}/day on 12, {OT_HOURS_PER_DAY['24']}/day "
@@ -225,16 +229,21 @@ class ArcValueTab(ctk.CTkFrame):
         if not rows:
             messagebox.showwarning(
                 "No Rows Found",
-                "No Technical ID / Extension Date / Working Shift columns were found.",
+                "No Technical ID / Extended Validity Date / Working Shift columns were found.",
             )
             return
-        self.grid.clear()
-        for index, row in enumerate(rows[:INPUT_ROWS]):
-            for column, key in enumerate(ARC_VALUE_INPUT_KEYS):
-                cell = self.grid.cells[index][column]
-                cell.delete(0, "end")
-                cell.insert(0, row.get(key, ""))
-        notify(self, f"{min(len(rows), INPUT_ROWS):,} input row(s) loaded.")
+        placed = self.grid.set_rows(rows)
+        if placed < len(rows):
+            # Never drop rows in silence: say how many did not fit.
+            messagebox.showwarning(
+                "More Rows Than the Grid Holds",
+                f"The file has {len(rows):,} input rows; the grid holds {INPUT_ROWS:,}. "
+                f"The first {placed:,} are loaded and calculated - the last "
+                f"{len(rows) - placed:,} are not. Split the file and run the rest "
+                f"separately.",
+            )
+        else:
+            notify(self, f"{placed:,} input row(s) loaded.")
         self.calculate()
 
     @staticmethod
@@ -262,7 +271,7 @@ class ArcValueTab(ctk.CTkFrame):
         if not rows:
             messagebox.showinfo(
                 "Nothing to Calculate",
-                "Paste at least one Technical ID, Extension Date and Working Shift.",
+                "Paste at least one Technical ID, Extended Validity Date and Working Shift.",
             )
             return
         self.lines, problems = self.calculator.calculate(rows)
