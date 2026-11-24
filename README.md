@@ -796,6 +796,28 @@ invoices receives a single email listing all of them. Nothing is sent: every mes
   machine in the email table. A machine referenced twice by different
   identifiers is listed once. Drafts go to **"Equipment Breakdown"**.
 
+  The grid takes **200 machines** in one run.
+
+  The letter's **Subject:** line is the email's own subject, word for word -
+  `Hired vehicle breakdown at Reliance, Jamnagar || Vendor Name (Code)` - so
+  the printed letter and the mail it arrived in always agree.
+
+  **Contact person.** The **Contact** row above the results holds the person
+  a vendor should reply to or call about the breakdown: a name, an email and
+  a contact number, set with **Set Contact**. It is entered once and
+  remembered, and printed under the equipment table of every breakdown
+  email:
+
+  > For any clarification or reply regarding the above breakdown equipment,
+  > please contact:
+  > **Contact Person:** ... · **Email:** ... · **Contact No.:** ...
+
+  Any of the three may be left blank - only what is filled in is printed, and
+  with none set the paragraph is left out altogether. The email is checked
+  for an @, the number for 6 to 15 digits. Changing the contact after the
+  emails are prepared re-writes them in place, without asking the
+  missing-equipment or missing-address questions again.
+
   **An identifier that is not in the Equipment Master is said out loud.** A
   window lists every one that could not be found, says how many machines did
   resolve, and has to be closed before the run goes on - a line of small text
@@ -1010,6 +1032,7 @@ vendor_app/
     communication_tab.py           the three email flows
     edit_dialog.py                 shared add/edit record + status dialog
     cc_dialog.py                   editable, pre-filled per-flow CC address dialog
+    contact_dialog.py              the breakdown email's contact person
     missing_email_dialog.py        collect absent vendor emails
     util.py                        window sizing, focus and debounce helpers
 data/                         local CSV stores, all three change logs, settings (git-ignored)

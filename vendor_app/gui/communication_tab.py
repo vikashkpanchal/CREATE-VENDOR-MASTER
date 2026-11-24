@@ -21,6 +21,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from vendor_app.config import (
+    BREAKDOWN_INPUT_ROWS,
     CC_BREAKDOWN_KEY,
     CC_DEFECTIVE_KEY,
     CC_FLOW_LABELS,
@@ -46,6 +47,7 @@ from vendor_app.gui.cc_dialog import CCAddressDialog
 from vendor_app.gui.paste_grid import PasteGrid
 from vendor_app.gui.missing_email_dialog import MissingEmailDialog
 from vendor_app.gui.style import build_table, insert_row
+from vendor_app.email_templates import breakdown_body
 from vendor_app.gui.toast import notify
 from vendor_app.gui.util import debounce, focus_on_click
 from vendor_app.gui.widgets import card, pill, primary_button, secondary_button, section_label, wrap_children
@@ -97,18 +99,25 @@ class _EmailFlow(ctk.CTkFrame):
         left.pack(side="left", fill="y", padx=(0, 14))
         left.pack_propagate(False)
         section_label(left, self.INPUT_TITLE).pack(anchor="w", padx=16, pady=(16, 0))
+        # The hint wraps to the panel's own width. Wrapped narrower than the
+        # panel, it ran to eight or nine lines, and on a 14" screen at 125%
+        # or 150% scaling those lines took the room the input needed - the
+        # breakdown grid was left showing its heading and no rows at all.
+        input_width = getattr(self, "INPUT_WIDTH", 340)
         ctk.CTkLabel(
             left, text=self.INPUT_HINT, font=theme.small_font(),
-            text_color=theme.TEXT_MUTED, justify="left", wraplength=300,
+            text_color=theme.TEXT_MUTED, justify="left", wraplength=input_width - 36,
         ).pack(anchor="w", padx=16, pady=(0, 8))
         # Buttons reserved at the bottom BEFORE the expanding input, so the
-        # input can never grow far enough to push them out of view.
-        button_width = getattr(self, "INPUT_WIDTH", 340) - 32
-        secondary_button(left, "Clear", self.clear_input, width=button_width).pack(
-            side="bottom", padx=16, pady=(0, 16)
+        # input can never grow far enough to push them out of view. They
+        # share one row: stacked, they cost the input a whole button's height.
+        buttons = ctk.CTkFrame(left, fg_color="transparent")
+        buttons.pack(side="bottom", fill="x", padx=16, pady=(8, 14))
+        secondary_button(buttons, "Clear", self.clear_input, width=90).pack(
+            side="right", padx=(8, 0)
         )
-        primary_button(left, "Prepare Emails", self.prepare, width=button_width).pack(
-            side="bottom", padx=16, pady=(10, 6)
+        primary_button(buttons, "Prepare Emails", self.prepare, width=120).pack(
+            side="left", fill="x", expand=True
         )
         self.build_input(left)
 
@@ -531,11 +540,9 @@ class DefectiveInvoiceFlow(_EmailFlow):
 class EquipmentBreakdownFlow(_EmailFlow):
     INPUT_TITLE = "BREAKDOWN EQUIPMENT"
     INPUT_HINT = (
-        "Paste straight from Excel into the grid: the identifier in the first "
-        "column (RH/RO Number, Technical ID or Reg No) and that machine's "
-        "remark in the second.\n\n"
-        "Everything else - equipment, capacity, UOM, Reg No, vendor - is "
-        "fetched from the Equipment Master, since these identifiers are unique."
+        "Paste from Excel: RH/RO Number, Technical ID or Reg No in the first "
+        f"column, the remark in the second - up to {BREAKDOWN_INPUT_ROWS} machines. "
+        "Equipment, capacity, UOM, Reg No and vendor come from the Equipment Master."
     )
     FOLDER = OUTLOOK_BREAKDOWN_FOLDER
     CC_KEY = CC_BREAKDOWN_KEY
@@ -551,10 +558,61 @@ class EquipmentBreakdownFlow(_EmailFlow):
             parent,
             columns=[("identifier", "RH / Technical ID / Reg No"), ("remarks", "Remarks")],
             widths=[20, 24],
-            rows=80,
+            rows=BREAKDOWN_INPUT_ROWS,
         )
         self.grid.pack(fill="both", expand=True, padx=16, pady=4)
 
+    # ------------------------------------------------ contact person --
+    def build_options(self, parent):
+        """Who the vendor should reply to: printed at the foot of every
+        breakdown email, entered once and remembered."""
+        ctk.CTkLabel(
+            parent, text="Contact:", font=theme.small_font(),
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 8))
+        # The button goes before the pill: name, email and number together
+        # run long, and on a narrow screen it is the pill that must give way,
+        # never the button that changes it.
+        secondary_button(parent, "Set Contact", self.change_contact, width=115).pack(
+            side="left", padx=(0, 8)
+        )
+        self.contact_pill = pill(parent, "", fg=theme.BG_CARD_ALT, tc=theme.TEXT_SECONDARY)
+        self.contact_pill.pack(side="left")
+        self.contact_pill.configure(cursor="hand2")
+        self.contact_pill.bind("<Button-1>", lambda e: self.change_contact())
+        self._refresh_contact_pill()
+
+    @staticmethod
+    def contact_summary(contact):
+        parts = [contact.get(k, "") for k in ("name", "email", "phone")]
+        return "  |  ".join(p for p in parts if p)
+
+    def _refresh_contact_pill(self):
+        summary = self.contact_summary(self.settings.breakdown_contact())
+        self.contact_pill.configure(
+            text=f"  {summary or '(not set)'}  "
+        )
+
+    def change_contact(self):
+        from vendor_app.gui.contact_dialog import BreakdownContactDialog
+        BreakdownContactDialog(self, self.settings, on_saved=self._on_contact_saved)
+
+    def _on_contact_saved(self, contact):
+        self._refresh_contact_pill()
+        summary = self.contact_summary(contact)
+        notify(self, f"Breakdown contact set to: {summary}" if summary
+               else "Breakdown contact cleared - emails will carry no contact line.")
+        # Emails already prepared were written with the old contact. Re-write
+        # their bodies in place - re-running the whole preparation would
+        # ask the missing-equipment and missing-address questions again.
+        for message in self.messages:
+            if "equipment" in message:
+                message["body_html"] = breakdown_body(
+                    message["vendor_name"], message["vendor_code"],
+                    message["equipment"], contact=contact,
+                )
+
+    # ------------------------------------------------------------- input --
     def read_input(self):
         return self.grid.get_rows()
 
@@ -591,7 +649,10 @@ class EquipmentBreakdownFlow(_EmailFlow):
         if not resolved["records"]:
             return None
 
-        result = build_breakdown_messages(self.store, resolved["records"], skip_codes=skip_codes)
+        result = build_breakdown_messages(
+            self.store, resolved["records"], skip_codes=skip_codes,
+            contact=self.settings.breakdown_contact(),
+        )
         note = f"{len(resolved['records'])} machine(s)"
         if resolved["missing"]:
             shown = ", ".join(resolved["missing"][:5])

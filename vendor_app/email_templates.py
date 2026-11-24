@@ -132,18 +132,50 @@ def breakdown_subject(vendor_name: str, vendor_code: str) -> str:
     )
 
 
-def breakdown_body(vendor_name: str, vendor_code: str, equipment: list) -> str:
+def breakdown_contact_html(contact) -> str:
+    """The "who to contact" paragraph at the foot of a breakdown email, or ""
+    when no contact person has been entered. Only the details given are
+    printed - a name with no phone number prints no empty "Contact No." line.
+    """
+    contact = contact or {}
+    name = str(contact.get("name", "") or "").strip()
+    email = str(contact.get("email", "") or "").strip()
+    phone = str(contact.get("phone", "") or "").strip()
+    if not (name or email or phone):
+        return ""
+    lines = []
+    if name:
+        lines.append(f"<b>Contact Person:</b> {escape(name)}")
+    if email:
+        lines.append(
+            f'<b>Email:</b> <a href="mailto:{escape(email, quote=True)}">{escape(email)}</a>'
+        )
+    if phone:
+        lines.append(f"<b>Contact No.:</b> {escape(phone)}")
+    return (
+        _para("For any clarification or reply regarding the above breakdown "
+              "equipment, please contact:")
+        + f'<p style="{BODY_STYLE} margin:0 0 10pt 0;">{"<br>".join(lines)}</p>'
+    )
+
+
+def breakdown_body(vendor_name: str, vendor_code: str, equipment: list,
+                   contact=None) -> str:
     """`equipment` is every broken-down machine for this vendor - one table,
-    one email per vendor."""
+    one email per vendor. `contact` is the {"name", "email", "phone"} the
+    vendor should reply to; it is printed under the table when given.
+
+    The "Subject:" line in the letter is the email's own subject, word for
+    word, so the printed letter and the mail it arrived in always agree.
+    """
     headers = [BREAKDOWN_EMAIL_HEADERS[k] for k in BREAKDOWN_EMAIL_COLUMNS]
     rows = [[eq.get(k, "") for k in BREAKDOWN_EMAIL_COLUMNS] for eq in equipment]
+    subject = escape(breakdown_subject(vendor_name, vendor_code))
 
     return (
         f'<div style="{BODY_STYLE}">'
         + _para("To,<br>M/s. " + escape(vendor_display(vendor_name, vendor_code)))
-        + _para(
-            "<b>Subject: Hired vehicle breakdown Battery Project at Reliance, Jamnagar</b>"
-        )
+        + _para(f"<b>Subject: {subject}</b>")
         + _para(
             "We regret to inform that vehicle hired by Reliance from your company is under "
             "breakdown as per latest site report. This is not acceptable."
@@ -166,6 +198,7 @@ def breakdown_body(vendor_name: str, vendor_code: str, equipment: list) -> str:
             "restoring date via return email."
         )
         + build_table(headers, rows)
+        + breakdown_contact_html(contact)
         + "</div>"
     )
 

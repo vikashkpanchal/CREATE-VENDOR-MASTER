@@ -894,6 +894,14 @@ CC_FLOW_LABELS = {
 # re-typing it on every run is how the wrong year ends up in a letter.
 FINANCIAL_YEAR_KEY = "gst_financial_year"
 
+# Who a vendor should contact about a breakdown letter: a name, an email and
+# a phone number, written at the foot of every breakdown email. Entered once
+# and remembered, like the CC row.
+BREAKDOWN_CONTACT_KEY = "breakdown_contact"
+
+# How many machines the breakdown input grid takes in one run.
+BREAKDOWN_INPUT_ROWS = 200
+
 
 def current_financial_year(today=None) -> str:
     """The Indian financial year containing `today`, as "2026-27".

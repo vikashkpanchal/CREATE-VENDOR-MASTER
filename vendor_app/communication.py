@@ -294,8 +294,10 @@ def resolve_breakdown_rows(equipment_store, identifiers: list, remarks=None) -> 
     return {"records": records, "missing": missing}
 
 
-def build_breakdown_messages(store, equipment_records: list, skip_codes=None) -> dict:
-    """One equipment-breakdown email per vendor, listing all their machines."""
+def build_breakdown_messages(store, equipment_records: list, skip_codes=None,
+                             contact=None) -> dict:
+    """One equipment-breakdown email per vendor, listing all their machines.
+    `contact` ({"name", "email", "phone"}) is printed at the foot of each."""
     skip_codes = {normalize(c) for c in (skip_codes or [])}
 
     grouped = {}
@@ -331,7 +333,10 @@ def build_breakdown_messages(store, equipment_records: list, skip_codes=None) ->
                 "vendor_name": name,
                 "to": to_addresses,
                 "subject": breakdown_subject(name, code),
-                "body_html": breakdown_body(name, code, equipment),
+                "body_html": breakdown_body(name, code, equipment, contact=contact),
+                # Kept so the body can be re-written if the contact person
+                # changes after the emails were prepared.
+                "equipment": equipment,
                 "row_count": len(equipment),
                 "label": f"{name} ({code})",
             }

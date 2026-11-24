@@ -11,8 +11,8 @@ import os
 import threading
 
 from vendor_app.config import (
-    CC_BREAKDOWN_KEY, CC_DEFECTIVE_KEY, CC_GST_KEY, FINANCIAL_YEAR_KEY,
-    SETTINGS_FILE, current_financial_year,
+    BREAKDOWN_CONTACT_KEY, CC_BREAKDOWN_KEY, CC_DEFECTIVE_KEY, CC_GST_KEY,
+    FINANCIAL_YEAR_KEY, SETTINGS_FILE, current_financial_year,
 )
 
 DEFAULTS = {
@@ -29,7 +29,11 @@ DEFAULTS = {
     # Blank until the user types one; the GST screen opens on the current
     # financial year when it has never been set.
     FINANCIAL_YEAR_KEY: "",
+    # Contact person printed at the foot of every breakdown email.
+    BREAKDOWN_CONTACT_KEY: {"name": "", "email": "", "phone": ""},
 }
+
+CONTACT_FIELDS = ("name", "email", "phone")
 
 CC_KEYS = (CC_DEFECTIVE_KEY, CC_BREAKDOWN_KEY, CC_GST_KEY)
 
@@ -112,6 +116,27 @@ class AppSettings:
     def set_financial_year(self, value: str):
         with self._lock:
             self._data[FINANCIAL_YEAR_KEY] = (value or "").strip()
+            self.save()
+
+    # ------------------------------------------- breakdown contact person --
+    def breakdown_contact(self) -> dict:
+        """{"name", "email", "phone"} - every key present, blank when unset.
+
+        Read defensively: a hand-edited settings file holding a string or a
+        list here must not stop the Communication tab from opening.
+        """
+        stored = self._data.get(BREAKDOWN_CONTACT_KEY)
+        if not isinstance(stored, dict):
+            stored = {}
+        return {field: str(stored.get(field, "") or "").strip() for field in CONTACT_FIELDS}
+
+    def set_breakdown_contact(self, name: str = "", email: str = "", phone: str = ""):
+        with self._lock:
+            self._data[BREAKDOWN_CONTACT_KEY] = {
+                "name": (name or "").strip(),
+                "email": (email or "").strip(),
+                "phone": (phone or "").strip(),
+            }
             self.save()
 
     def cc_prompted_for(self, key: str) -> bool:
