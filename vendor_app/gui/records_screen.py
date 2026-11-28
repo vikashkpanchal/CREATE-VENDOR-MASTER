@@ -147,15 +147,18 @@ class RecordsScreen(ctk.CTkFrame):
         self.search_var.trace_add(
             "write", lambda *a: debounce(self, "_search_after", 200, self.refresh)
         )
+        # The count is packed before the search box, so the box is what gives
+        # room back on a narrow screen - packed after it, the count was the
+        # one squeezed, and read "reco" on the Equipment Records screen.
+        self.count_pill = pill(search_block, "0 records")
+        self.count_pill.pack(side="right", padx=12)
         # Elastic: wide on a wide screen, and able to give room back on a
         # narrow one rather than pushing the buttons off the edge.
         ctk.CTkEntry(
-            search_block, textvariable=self.search_var, width=200, height=32,
+            search_block, textvariable=self.search_var, width=120, height=32,
             placeholder_text="Filter records...",
             fg_color=theme.BG_INPUT, border_color=theme.BG_INPUT_BORDER,
         ).pack(side="left", fill="x", expand=True)
-        self.count_pill = pill(search_block, "0 records")
-        self.count_pill.pack(side="left", padx=12)
 
         right_actions = ctk.CTkFrame(toolbar, fg_color="transparent")
         right_actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
@@ -163,6 +166,7 @@ class RecordsScreen(ctk.CTkFrame):
             side="left", padx=(8, 0)
         )
         self.extra_actions(right_actions)
+        self._wrap_toolbar(toolbar, search_block, right_actions)
 
         # The hint and the view controls share a row, with the controls in a
         # reserved grid column so a long hint can never push them off-screen.
@@ -205,6 +209,41 @@ class RecordsScreen(ctk.CTkFrame):
         self._grid_wrap.grid_rowconfigure(0, weight=1)
         self._grid_wrap.grid_columnconfigure(0, weight=1)
         self._build_table()
+
+    @staticmethod
+    def _wrap_toolbar(toolbar, search_block, actions):
+        """Move the buttons under the search box when one line cannot hold both.
+
+        A screen with many actions - Equipment Records has six buttons and a
+        fleet dropdown - leaves no room for the search box and its record
+        count at 125% scaling on a 14" laptop, and the count was squeezed to
+        "reco". One line is kept whenever it fits; only a toolbar genuinely
+        too narrow takes a second line, and it goes back as soon as it can.
+        """
+        state = {"wrapped": False}
+
+        def fits(width):
+            needed = sum(child.winfo_reqwidth() for child in search_block.winfo_children())
+            return width >= needed + 40 + actions.winfo_reqwidth()
+
+        def place(_event=None):
+            width = toolbar.winfo_width()
+            if width <= 1:
+                return
+            wrap = not fits(width)
+            if wrap == state["wrapped"]:
+                return
+            state["wrapped"] = wrap
+            if wrap:
+                search_block.grid_configure(columnspan=2)
+                actions.grid_configure(row=1, column=0, columnspan=2, sticky="e",
+                                       padx=(0, 0), pady=(8, 0))
+            else:
+                search_block.grid_configure(columnspan=1)
+                actions.grid_configure(row=0, column=1, columnspan=1, sticky="e",
+                                       padx=(12, 0), pady=(0, 0))
+
+        toolbar.bind("<Configure>", place, add="+")
 
     def _build_table(self):
         self.table = EditableTable(
